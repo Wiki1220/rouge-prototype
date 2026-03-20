@@ -1,6 +1,11 @@
-﻿# Rouge Prototype
+# Rouge Prototype
 
 This prototype now includes combat rooms, reward rooms, a rest room, and a boss finale.
+
+## Docs
+
+- Original requirement document: `untitled.md`
+- Current implementation progress and roadmap: `STATUS.md`
 
 ## Current slice
 
@@ -15,6 +20,7 @@ This prototype now includes combat rooms, reward rooms, a rest room, and a boss 
   - elemental resonance bonuses
   - shop rooms, treasure rooms, and a rest room
   - boss wave with burst projectile pattern
+  - boss phase escalation and reinforcement pressure
   - 8-room vertical slice
 
 ## Run locally
