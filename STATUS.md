@@ -19,7 +19,7 @@ The project is currently a browser-based Canvas prototype focused on validating 
 4. Fill the value log.
 5. Receive skill choices.
 6. Build the run through shops and reward rooms.
-7. Reach a boss room and finish the slice.
+7. Clear the 23-wave main route and continue into the endless trial.
 
 The prototype is already deployed as a public static build and has also been published as an open-source GitHub repository.
 
@@ -49,7 +49,9 @@ The prototype is already deployed as a public static build and has also been pub
 - Skill choice and replacement flow.
 - Skill casting with keyboard shortcuts.
 - Runtime support for radial burst, forward spread, and homing-type skills.
-- Resonance hooks that can add bonuses such as heal-on-cast and flat damage.
+- Active skills now support effect-descriptor execution with repeat, heal, timed modifier, and max-HP growth templates.
+- Projectile-oriented effects can now carry configurable pierce, splash, slow, and chain parameters.
+- Resonance hooks can add bonuses such as heal-on-cast, flat damage, pierce, splash, and slow-on-hit.
 
 ### Build and Shop Systems
 
@@ -67,17 +69,21 @@ The prototype is already deployed as a public static build and has also been pub
 - Ranged enemy behavior.
 - Enemy projectile bursts and spread.
 - Wave/room progression driven by configuration data.
-- Boss room at the end of the current slice.
 - Boss phase escalation:
   - phase 2 trigger near 66% HP
   - phase 3 trigger near 33% HP
   - increased speed, rate of fire, projectile pressure
   - reinforcement summoning during later phases
+- Distinct boss mechanics:
+  - Overseer telegraphed lock-on volleys
+  - Crown Core radial novas and meteor-style fire drops
+- Acid, fire, and spike-trap terrain hazards are supported.
 
 ### Meta Structure
 
-- 8-room vertical slice.
-- Combat rooms, reward rooms, rest flow, and final boss flow.
+- 23-wave main route matching the current design direction.
+- Combat rooms, treasure room, rest room, boss flow, and post-clear endless trial.
+- Endless loop that scales wave composition after the main route.
 - Victory and failure states.
 - Restart loop for repeated runs.
 
@@ -94,7 +100,7 @@ The prototype is already deployed as a public static build and has also been pub
 - Enemy archetypes are data-defined.
 - Wave definitions are data-defined.
 - Shop items and reel entries are data-defined.
-- Skills are stored in a library and resolved by runtime functions.
+- Skills are stored in a library and can now be defined through reusable effect descriptors instead of one-off runtime handlers.
 
 ## What Is Still Prototype-Level
 
@@ -109,9 +115,9 @@ The current version is playable, but a lot of it still sits at prototype quality
 
 ### Skill Architecture
 
-- Skill effects are still partly hard-coded in runtime functions.
-- The system is not yet fully data-driven at the effect-template level.
-- There is no richer keyword system for chaining effects together.
+- Skill effects are now partially template-driven, but several advanced patterns still depend on runtime helpers.
+- Delayed casts, summon-type skills, shield layers, and persistent aura skills still need reusable descriptors.
+- There is no richer keyword system yet for conditional chaining, cooldown-sharing, or proc-based triggers.
 
 ### Boss Depth
 
@@ -121,8 +127,8 @@ The current version is playable, but a lot of it still sits at prototype quality
 
 ### Content Volume
 
-- The project is still an 8-room slice, not the full long-form run described by the design direction.
-- Enemy pool is still limited.
+- The full long-form run now exists, but endless scaling, variety, and economy depth are still prototype-level.
+- Enemy pool is still limited, though hazard-focused variants now include acid, fire, and spike trap threats.
 - Skill pool and item pool need significant expansion.
 - Element combinations and resonance outcomes are still early.
 
@@ -187,7 +193,7 @@ Goal: turn the vertical slice into a fuller run.
 
 Suggested work:
 
-- Expand room count beyond 8.
+- Expand endless content variety and special event rooms.
 - Add more enemy archetypes and elite behaviors.
 - Add more skills, reels, and shop items.
 - Add at least one additional boss or boss variant.
@@ -239,6 +245,6 @@ Suggested work:
 
 If development continues from the current branch, the best next step is:
 
-1. Upgrade the boss into a truly mechanical multi-phase encounter.
-2. Refactor skills into a more modular data-driven template system.
-3. Expand content only after those two systems are stable.
+1. Refactor skills into a more modular data-driven template system.
+2. Deepen endless mode with rotating modifiers, elite packs, and reward rules.
+3. Improve presentation, onboarding, and balance once those systems settle.

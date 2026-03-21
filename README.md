@@ -1,6 +1,6 @@
 # Rouge Prototype
 
-This prototype now includes combat rooms, reward rooms, a rest room, and a boss finale.
+This prototype now includes a full 23-wave main run, reward rooms, rest flow, boss encounters, and an endless trial unlocked after the finale.
 
 ## Docs
 
@@ -19,9 +19,10 @@ This prototype now includes combat rooms, reward rooms, a rest room, and a boss 
   - ranged enemies and enemy bullets
   - elemental resonance bonuses
   - shop rooms, treasure rooms, and a rest room
-  - boss wave with burst projectile pattern
-  - boss phase escalation and reinforcement pressure
-  - 8-room vertical slice
+  - elite enemies, acid hazards, fire trail hazards, and spike traps
+  - multi-phase boss mechanics with telegraphed attacks
+  - 23-wave main route plus wave 24 endless trial
+  - template-driven active skills with extensible effect descriptors
 
 ## Run locally
 
