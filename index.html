@@ -1,36 +1,22 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>轮骰生存 原型验证版</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>轮骰生存</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
-    <div class="app-shell">
-      <header class="topbar">
-        <div>
-          <h1>轮骰生存</h1>
-          <p>弹幕生存、滚筒伤害、技能抽取与波次构筑的可玩原型。</p>
-        </div>
-        <div class="hint">
-          <span>移动：WASD</span>
-          <span>选择候选：Q / E</span>
-          <span>释放技能：Z / C</span>
-          <span>购买商店：1 / 2 / 3</span>
-          <span>奖励领取：1 - 5</span>
-        </div>
-      </header>
-
-      <main class="layout">
-        <aside class="hud-panel" id="hud-panel"></aside>
-        <section class="battle-panel">
-          <canvas id="game-canvas" width="960" height="640"></canvas>
+    <div class="app-root">
+      <div class="game-shell">
+        <div id="game-frame" class="game-frame">
+          <canvas id="game-canvas" width="1280" height="720" class="game-canvas"></canvas>
+          <div id="hud-panel" class="hud-panel"></div>
           <div id="overlay-root" class="overlay-root"></div>
-        </section>
-      </main>
+          <div id="menu-layer" class="menu-layer"></div>
+        </div>
+      </div>
     </div>
-
-    <script type="module" src="./src/main.js"></script>
+    <script type="module" src="./src/main.ts"></script>
   </body>
 </html>

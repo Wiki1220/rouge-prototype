@@ -8,14 +8,24 @@
 } from "./config.js";
 import { clamp, distance, normalize, pickUnique, randomInt } from "./utils.js";
 
-export function createGame({ canvas, hudRoot, overlayRoot }) {
+export function createGame({ canvas, hudRoot, overlayRoot, options = {} }) {
   const ctx = canvas.getContext("2d");
   const input = createInput();
-  let state = createInitialState();
+  let state = createInitialState(options);
   let lastTime = performance.now();
+  let running = false;
+
+  resizeCanvas();
 
   const game = {
     start,
+    stop,
+    restart,
+    toggleDebugNoDamage,
+    addGold,
+    healFull,
+    skipRoom,
+    forceSkillChoices,
     spawnRadialBurst,
     spawnForwardSpread,
     spawnHomingShots,
@@ -27,16 +37,65 @@ export function createGame({ canvas, hudRoot, overlayRoot }) {
     addPulseAura,
   };
 
-  beginWave(state, 1);
+  beginWave(state, options.startWave ?? 1);
   updateHud();
 
   function start() {
+    if (running) return;
+    running = true;
     window.addEventListener("keydown", input.onKeyDown);
     window.addEventListener("keyup", input.onKeyUp);
+    window.addEventListener("resize", resizeCanvas);
     requestAnimationFrame(loop);
   }
 
+  function stop() {
+    running = false;
+    window.removeEventListener("keydown", input.onKeyDown);
+    window.removeEventListener("keyup", input.onKeyUp);
+    window.removeEventListener("resize", resizeCanvas);
+  }
+
+  function restart() {
+    state = createInitialState(options);
+    beginWave(state, options.startWave ?? 1);
+  }
+
+  function toggleDebugNoDamage(force) {
+    state.debugNoDamage = typeof force === "boolean" ? force : !state.debugNoDamage;
+    announceBossPhase(state.debugNoDamage ? "测试无敌已开启" : "测试无敌已关闭");
+  }
+
+  function addGold(amount) {
+    state.gold = Math.max(0, state.gold + amount);
+  }
+
+  function healFull() {
+    state.player.hp = state.player.maxHp;
+  }
+
+  function skipRoom() {
+    if (state.phase === "battle") {
+      state.spawnQueue = [];
+      state.enemies = [];
+      state.projectiles = [];
+      state.hazards = [];
+      state.telegraphs = [];
+      completeCurrentBattle();
+      return;
+    }
+    if (state.phase === "shop" || state.phase === "reward") {
+      advanceFromRoom();
+    }
+  }
+
+  function forceSkillChoices() {
+    if (state.phase !== "battle") return;
+    state.pendingSkillChoices = getSkillChoicesFromCurrentRecord();
+  }
+
   function loop(time) {
+    if (!running) return;
     const dt = Math.min((time - lastTime) / 1000, 0.05);
     lastTime = time;
     update(dt);
@@ -67,8 +126,8 @@ export function createGame({ canvas, hudRoot, overlayRoot }) {
         handleRewardInput();
       }
     } else if ((state.phase === "gameover" || state.phase === "victory") && input.consume("KeyR")) {
-      state = createInitialState();
-      beginWave(state, 1);
+      state = createInitialState(options);
+      beginWave(state, options.startWave ?? 1);
     }
 
     if (state.phase === "battle") {
@@ -207,7 +266,7 @@ export function createGame({ canvas, hudRoot, overlayRoot }) {
         } else if (enemy.dashCooldown <= 0 && dist > 1.4) {
           enemy.dashTimeLeft = enemy.dash.duration;
           enemy.dashCooldown = enemy.dash.cooldown;
-          announceBossPhase(enemy.name);
+          announceBossPhase(getEnemyLabel(enemy));
         }
       }
       enemy.position.x = clamp(enemy.position.x + dir.x * moveSpeed * moveIntent * dt, 0.4, GAME_CONFIG.arena.width - 0.4);
@@ -301,7 +360,7 @@ export function createGame({ canvas, hudRoot, overlayRoot }) {
         color: "#ff8ca1",
       });
     }
-    announceBossPhase(`${enemy.name} 释放环形爆发`);
+    announceBossPhase(`${getEnemyLabel(enemy)} 释放环形爆发`);
   }
 
   function updateOverseerPattern(enemy, direction, dt) {
@@ -343,7 +402,7 @@ export function createGame({ canvas, hudRoot, overlayRoot }) {
       damage: (enemy.projectile?.damage ?? 1) + (enemy.phase >= 3 ? 1 : 0),
       colorShot: "#ffe29a",
     });
-    announceBossPhase(`${enemy.name} 锁定齐射`);
+    announceBossPhase(`${getEnemyLabel(enemy)} 锁定齐射`);
   }
 
   function fireLockedVolley(enemy) {
@@ -395,7 +454,7 @@ export function createGame({ canvas, hudRoot, overlayRoot }) {
         damage: enemy.phase >= 3 ? 2 : 1,
       });
     }
-    announceBossPhase(`${enemy.name} 呼唤落火`);
+    announceBossPhase(`${getEnemyLabel(enemy)} 呼唤落火`);
   }
 
   function updateTelegraphs(dt) {
@@ -461,7 +520,7 @@ export function createGame({ canvas, hudRoot, overlayRoot }) {
       enemy.projectileDamageBonus = 1;
       enemy.pendingSummons = Math.max(enemy.pendingSummons ?? 0, enemy.id === "finalBoss" ? 3 : 2);
       enemy.summonCooldown = 0.7;
-      announceBossPhase(`${enemy.name} 进入第二阶段`);
+      announceBossPhase(`${getEnemyLabel(enemy)} 进入第二阶段`);
     } else if (enemy.phase === 2 && hpRatio <= 0.33) {
       enemy.phase = 3;
       enemy.speedScale = enemy.id === "finalBoss" ? 1.3 : 1.24;
@@ -470,7 +529,7 @@ export function createGame({ canvas, hudRoot, overlayRoot }) {
       enemy.projectileDamageBonus = enemy.id === "finalBoss" ? 3 : 2;
       enemy.pendingSummons = Math.max(enemy.pendingSummons ?? 0, enemy.id === "finalBoss" ? 4 : 3);
       enemy.summonCooldown = 0.45;
-      announceBossPhase(`${enemy.name} 进入最终阶段`);
+      announceBossPhase(`${getEnemyLabel(enemy)} 进入最终阶段`);
     }
   }
 
@@ -722,6 +781,84 @@ export function createGame({ canvas, hudRoot, overlayRoot }) {
 
   function formatElementList(elements) {
     return elements.map((element) => formatElementLabel(element)).join(" / ");
+  }
+
+
+  function hasUnreadableText(text) {
+    return typeof text === "string" && /[?�]/.test(text);
+  }
+
+  function getReadableText(value, fallback) {
+    if (typeof value !== "string" || value.trim().length === 0 || hasUnreadableText(value)) return fallback;
+    return value;
+  }
+
+  function getEnemyLabel(enemy) {
+    const fallbackById = {
+      bruiser: "重甲怪",
+      runner: "迅行怪",
+      turret: "炮台怪",
+      sniper: "狙击怪",
+      trail: "酸痕怪",
+      ember: "余烬怪",
+      eliteDash: "冲锋精英",
+      eliteNest: "裂巢精英",
+      eliteRevive: "复生精英",
+      elite: "精英卫士",
+      boss: "监察者",
+      finalBoss: "王冠核心",
+    };
+    return getReadableText(enemy?.name, fallbackById[enemy?.id] ?? enemy?.id ?? "敌人");
+  }
+
+  function getOfferLabel(offer) {
+    return getReadableText(offer?.name, offer?.id ?? "未命名条目");
+  }
+
+  function getOfferDescription(offer) {
+    return getReadableText(offer?.description, offer?.id ? `配置项：${offer.id}` : "暂无说明");
+  }
+
+  function getSkillLabel(skill) {
+    const fallbackById = {
+      "flare-burst": "灼焰迸发",
+      "gale-step": "疾风步",
+      "tidal-shell": "潮汐护壳",
+      "spark-link": "雷链追击",
+      "verdant-pulse": "青木脉冲",
+      "monsoon-drive": "季风驱动",
+      "voltaic-lattice": "伏特矩阵",
+      "perfect-overdrive": "极限超载",
+      "ember-echo": "余烬回响",
+      "torrent-lance": "洪流穿枪",
+      "storm-recital": "风暴咏叹",
+      "evergreen-oath": "常青誓约",
+      "frost-ward": "霜镜护场",
+      "delayed-sunburst": "迟滞日珥",
+      "sanctuary-ring": "回春圣环",
+    };
+    return getReadableText(skill?.name, fallbackById[skill?.id] ?? skill?.id ?? "空");
+  }
+
+  function getSkillDescription(skill, fallback) {
+    const fallbackById = {
+      "flare-burst": "向周身释放 6 枚火焰爆裂弹。",
+      "gale-step": "4 秒内移动速度提升 60%。",
+      "tidal-shell": "恢复 2 点生命，并在 4 秒内减伤 50%。",
+      "spark-link": "释放 3 枚追踪雷弹，可触发连锁。",
+      "verdant-pulse": "最大生命 +1，并恢复 4 点生命。",
+      "monsoon-drive": "朝前方泼洒 8 枚季风弹幕。",
+      "voltaic-lattice": "8 秒内攻速提升并强化连锁概率。",
+      "perfect-overdrive": "10 秒内大幅提升攻速与弹速。",
+      "ember-echo": "连续两次释放环形余烬爆裂。",
+      "torrent-lance": "射出可穿透并减速的洪流长枪。",
+      "storm-recital": "连续生成多轮追踪风雷弹。",
+      "evergreen-oath": "提升生命上限、恢复生命并短暂加速。",
+      "frost-ward": "获得护盾，并在周围形成减速冰环。",
+      "delayed-sunburst": "短暂延迟后爆发一圈高伤日珥。",
+      "sanctuary-ring": "生成护盾与持续回复光环。",
+    };
+    return getReadableText(skill?.description, fallbackById[skill?.id] ?? fallback);
   }
 
   function formatPhaseLabel(phase) {
@@ -1010,7 +1147,7 @@ export function createGame({ canvas, hudRoot, overlayRoot }) {
     targetState.telegraphs = [];
     targetState.hazards = [];
     targetState.waveBuffUsage = { red: 0, blue: 0, green: 0 };
-    targetState.player.position = { x: 5, y: 5 };
+    targetState.player.position = { x: GAME_CONFIG.arena.width / 2, y: GAME_CONFIG.arena.height / 2 };
     targetState.pendingSkillChoices = null;
     if (wave.type === "combat") {
       targetState.phase = "battle";
@@ -1021,12 +1158,14 @@ export function createGame({ canvas, hudRoot, overlayRoot }) {
       targetState.roomOffers = wave.roomOffers.map((id) => ({ ...buildOfferFromId(id), taken: false }));
       targetState.roomSelectionsLeft = wave.freeSelections ?? 1;
       if (wave.mode === "treasure") {
+        const centerX = GAME_CONFIG.arena.width / 2;
+        const centerY = GAME_CONFIG.arena.height / 2;
         const pickupPositions = [
-          { x: 5, y: 2.2 },
-          { x: 7.1, y: 3.4 },
-          { x: 6.3, y: 6.6 },
-          { x: 3.7, y: 6.6 },
-          { x: 2.9, y: 3.4 },
+          { x: centerX, y: centerY - 4.2 },
+          { x: centerX + 3.4, y: centerY - 1.8 },
+          { x: centerX + 2.2, y: centerY + 2.8 },
+          { x: centerX - 2.2, y: centerY + 2.8 },
+          { x: centerX - 3.4, y: centerY - 1.8 },
         ];
         targetState.roomPickups = targetState.roomOffers.map((offer, index) => ({
           offerIndex: index,
@@ -1045,8 +1184,9 @@ export function createGame({ canvas, hudRoot, overlayRoot }) {
   }
 
   function getWaveLabel(wave = getCurrentWave()) {
-    if (wave.endless) return `?24?????? ${state.endlessLevel}`;
-    return wave.label;
+    if (wave.endless) return `第24波之后 · 无尽 ${state.endlessLevel}`;
+    const fallback = wave.type === "combat" ? `第${wave.id}波 战斗` : wave.mode === "treasure" ? `第${wave.id}波 宝箱房` : wave.mode === "rest" ? `第${wave.id}波 休息房` : `第${wave.id}波`;
+    return getReadableText(wave.label, fallback);
   }
 
   function getMainWaveCount() {
@@ -1056,7 +1196,7 @@ export function createGame({ canvas, hudRoot, overlayRoot }) {
 
   function getWaveProgressText() {
     const wave = getCurrentWave();
-    if (wave.endless) return `???? / ?? ${state.endlessLevel}`;
+    if (wave.endless) return `主线完成 / 无尽 ${state.endlessLevel}`;
     return `${state.waveIndex}/${getMainWaveCount()}`;
   }
 
@@ -1251,66 +1391,65 @@ export function createGame({ canvas, hudRoot, overlayRoot }) {
 
   function updateHud() {
     const resonance = computeResonance();
-    const wave = getCurrentWave();
-    const leadingElements = resolveLeadingElements();
-    const resonanceText = Object.entries(resonance.counts).filter(([, count]) => count > 0).map(([element, count]) => `${formatElementLabel(element)}:${count}`).join(" | ") || "无";
+    const resonanceText = Object.entries(resonance.counts)
+      .filter(([, count]) => count > 0)
+      .map(([element, count]) => `${formatElementLabel(element)}:${count}`)
+      .join(" ") || "无";
     hudRoot.innerHTML = `
-      <div class="section">
-        <h2>技能与候选</h2>
-        <div class="grid skill-row">
-          ${renderSkillCard("候选 Q", state.pendingSkillChoices?.[0], "按 Q 装备此候选技能")}
-          ${renderSkillCard("候选 E", state.pendingSkillChoices?.[1], "按 E 装备此候选技能")}
-          ${renderSkillCard("槽位 Z", state.equippedSkills[0], "按 Z 释放槽位技能")}
-          ${renderSkillCard("槽位 C", state.equippedSkills[1], "按 C 释放槽位技能")}
+      <div class="hud-cluster hud-top-left">
+        <div class="hud-card hud-slim-card">
+          <div class="hud-title-row hud-inline-row">
+            <span class="hud-title">状态</span>
+            <span class="subvalue">HP ${state.player.hp}/${state.player.maxHp}</span>
+            <span class="subvalue">金 ${state.gold}</span>
+            ${state.debugNoDamage ? `<span class="subvalue">无敌</span>` : ""}
+          </div>
+        </div>
+        <div class="hud-card hud-side-card">
+          <div class="hud-title-row">
+            <span class="hud-title">滚筒</span>
+            <span class="chip">${resonanceText}</span>
+          </div>
+          <div class="grid reel-column">
+            ${state.reels.map((reel, index) => `
+              <div class="box compact ${(index === state.activeReelIndex ? "highlight" : "") + (index === state.selectedReelIndex && state.phase === "shop" ? " selected" : "")}">
+                <span class="label">d${reel.sides}</span>
+                <div class="value">${reel.lastValue ?? "..."}</div>
+                <div class="subvalue">${formatElementList(reel.elements)}${reel.bias ? ` | 偏置 +${reel.bias}` : ""}</div>
+              </div>`).join("")}
+          </div>
         </div>
       </div>
-      <div class="section">
-        <h2>滚筒阵列</h2>
-        <div class="grid reel-row">
-          ${state.reels.map((reel, index) => `
-            <div class="box ${(index === state.activeReelIndex ? "highlight" : "") + (index === state.selectedReelIndex && state.phase === "shop" ? " selected" : "")}">
-              <span class="label">d${reel.sides}</span>
-              <div class="value">${reel.lastValue ?? "..."}</div>
-              <div class="subvalue">${formatElementList(reel.elements)}${reel.bias ? ` | 偏置 +${reel.bias}` : ""}</div>
-              <div class="subvalue">售价 ${reel.sellPrice ?? "-"}</div>
-            </div>`).join("")}
+      <div class="hud-cluster hud-right-side">
+        <div class="hud-card hud-side-card">
+          <div class="hud-title-row">
+            <span class="hud-title">记录</span>
+            <span class="chip">${state.kills}</span>
+          </div>
+          <div class="grid value-column">
+            ${state.valueSlots.map((value, index) => `
+              <div class="box compact ${index === state.nextValueSlotIndex ? "highlight" : ""}">
+                <span class="label">槽 ${index + 1}</span>
+                <div class="value">${value ?? "-"}</div>
+              </div>`).join("")}
+          </div>
         </div>
       </div>
-      <div class="section">
-        <h2>数值记录</h2>
-        <div class="grid value-row">
-          ${state.valueSlots.map((value, index) => `
-            <div class="box ${index === state.nextValueSlotIndex ? "highlight" : ""}">
-              <span class="label">槽 ${index + 1}</span>
-              <div class="value">${value ?? "-"}</div>
-            </div>`).join("")}
+      <div class="hud-cluster hud-bottom-center">
+        <div class="hud-card hud-bottom-strip">
+          <div class="skill-strip">
+            ${renderSkillCard("Q", state.pendingSkillChoices?.[0], "未抽取")}
+            ${renderSkillCard("E", state.pendingSkillChoices?.[1], "未抽取")}
+            ${renderSkillCard("Z", state.equippedSkills[0], "空槽")}
+            ${renderSkillCard("C", state.equippedSkills[1], "空槽")}
+          </div>
         </div>
-      </div>
-      <div class="section">
-        <h2>战斗状态</h2>
-        <div class="grid stats">
-          <div class="box"><span class="label">生命</span><div class="value">${state.player.hp}/${state.player.maxHp}</div></div>
-          <div class="box"><span class="label">金币</span><div class="value">${state.gold}</div></div>
-          <div class="box"><span class="label">波次</span><div class="value">${getWaveProgressText()}</div></div>
-          <div class="box"><span class="label">房间</span><div class="value">${getWaveLabel(wave)}</div></div>
-          <div class="box"><span class="label">首领</span><div class="value">${(() => { const boss = state.enemies.find((enemy) => enemy.isBoss); return boss ? `${boss.name} 第${boss.phase}阶段 ${Math.max(0, Math.ceil(boss.hp))}/${boss.maxHp}` : "无"; })()}</div></div>
-          <div class="box"><span class="label">测试</span><div class="value">${state.debugNoDamage ? "无敌开启" : "关闭"}</div></div>
-        </div>
-        <div class="box" style="margin-top:8px;">
-          <span class="label">共鸣</span>
-          <div class="subvalue">${resonanceText}</div>
-        </div>
-        <div class="box" style="margin-top:8px;">
-          <span class="label">技能池元素</span>
-          <div class="subvalue">${leadingElements.length > 0 ? formatElementList(leadingElements) : "无"}</div>
-        </div>
-        ${state.bossAnnouncement ? `<div class="box" style="margin-top:8px; border-color:#ffd166;"><span class="label">提示</span><div class="subvalue">${state.bossAnnouncement}</div></div>` : ""}
       </div>
     `;
   }
 
   function renderSkillCard(title, skill, fallback) {
-    return `<div class="box skill"><span class="label">${title}</span><div class="value">${skill?.name ?? "空"}</div><div class="subvalue">${skill?.description ?? fallback}</div></div>`;
+    return `<div class="skill-pill"><span class="skill-key">${title}</span><span class="skill-name">${getSkillLabel(skill) || fallback}</span></div>`;
   }
 
   function updateOverlay() {
@@ -1319,7 +1458,7 @@ export function createGame({ canvas, hudRoot, overlayRoot }) {
       overlayRoot.innerHTML = `
         <div class="overlay-card">
           <h3>商店阶段</h3>
-          <div class="offer-grid">${state.shopOffers.map((offer, index) => `<div class="offer"><div class="chip">${index + 1}</div><div class="value">${offer.name}</div><p>价格：${offer.price}</p><p>${offer.description}</p></div>`).join("")}</div>
+          <div class="offer-grid">${state.shopOffers.map((offer, index) => `<div class="offer"><div class="chip">${index + 1}</div><div class="value">${getOfferLabel(offer)}</div><p>价格：${offer.price}</p><p>${getOfferDescription(offer)}</p></div>`).join("")}</div>
           <div class="footer-note">按 1/2/3 购买，左右方向键切换滚筒，X 售出当前滚筒，空格继续。当前金币：${state.gold}</div>
         </div>`;
       return;
@@ -1329,7 +1468,7 @@ export function createGame({ canvas, hudRoot, overlayRoot }) {
         overlayRoot.innerHTML = `
         <div class="overlay-card">
           <h3>${getWaveLabel(wave)}</h3>
-          <div class="offer-grid">${state.roomOffers.map((offer, index) => `<div class="offer ${offer.taken ? "taken" : ""}"><div class="chip">${index + 1}</div><div class="value">${offer.name}</div><p>${offer.description}</p><p>${offer.taken ? "已领取" : "移动拾取"}</p></div>`).join("")}</div>
+          <div class="offer-grid">${state.roomOffers.map((offer, index) => `<div class="offer ${offer.taken ? "taken" : ""}"><div class="chip">${index + 1}</div><div class="value">${getOfferLabel(offer)}</div><p>${getOfferDescription(offer)}</p><p>${offer.taken ? "已领取" : "移动拾取"}</p></div>`).join("")}</div>
           <div class="footer-note">剩余可选次数：${state.roomSelectionsLeft}。用 WASD 移动拾取奖励，拿满后按空格继续。</div>
         </div>`;
         return;
@@ -1337,7 +1476,7 @@ export function createGame({ canvas, hudRoot, overlayRoot }) {
       overlayRoot.innerHTML = `
         <div class="overlay-card">
           <h3>${getWaveLabel(wave)}</h3>
-          <div class="offer-grid">${state.roomOffers.map((offer, index) => `<div class="offer ${offer.taken ? "taken" : ""}"><div class="chip">${index + 1}</div><div class="value">${offer.name}</div><p>${offer.description}</p><p>${offer.taken ? "已领取" : "可领取"}</p></div>`).join("")}</div>
+          <div class="offer-grid">${state.roomOffers.map((offer, index) => `<div class="offer ${offer.taken ? "taken" : ""}"><div class="chip">${index + 1}</div><div class="value">${getOfferLabel(offer)}</div><p>${getOfferDescription(offer)}</p><p>${offer.taken ? "已领取" : "可领取"}</p></div>`).join("")}</div>
           <div class="footer-note">剩余可选次数：${state.roomSelectionsLeft}。按 1-${Math.min(5, state.roomOffers.length)} 领取奖励，完成后按空格继续。</div>
         </div>`;
       return;
@@ -1354,6 +1493,7 @@ export function createGame({ canvas, hudRoot, overlayRoot }) {
   }
 
   function render() {
+    resizeCanvas();
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     drawArena();
     drawAuras();
@@ -1367,13 +1507,22 @@ export function createGame({ canvas, hudRoot, overlayRoot }) {
   }
 
   function drawArena() {
+    const unit = getViewUnit();
+    const cellSize = unit * 0.98;
     for (let y = 0; y < GAME_CONFIG.arena.height; y += 1) {
       for (let x = 0; x < GAME_CONFIG.arena.width; x += 1) {
+        const cellCenter = { x: x + 0.5, y: y + 0.5 };
+        const position = toCanvasPosition(cellCenter);
         const isOuter = x < GAME_CONFIG.arena.playableInset || y < GAME_CONFIG.arena.playableInset || x >= GAME_CONFIG.arena.width - GAME_CONFIG.arena.playableInset || y >= GAME_CONFIG.arena.height - GAME_CONFIG.arena.playableInset;
-        ctx.fillStyle = isOuter ? "#52461d" : "#1f2a36";
-        ctx.fillRect(GAME_CONFIG.arena.originX + x * GAME_CONFIG.arena.cellSize, GAME_CONFIG.arena.originY + y * GAME_CONFIG.arena.cellSize, GAME_CONFIG.arena.cellSize - 2, GAME_CONFIG.arena.cellSize - 2);
+        ctx.fillStyle = isOuter ? "#3d3114" : ((x + y) % 2 === 0 ? "#101a25" : "#132130");
+        ctx.fillRect(position.x - cellSize / 2, position.y - cellSize / 2, cellSize, cellSize);
       }
     }
+    ctx.strokeStyle = "rgba(255,255,255,0.08)";
+    ctx.lineWidth = 3;
+    const topLeft = toCanvasPosition({ x: 0, y: 0 });
+    const bottomRight = toCanvasPosition({ x: GAME_CONFIG.arena.width, y: GAME_CONFIG.arena.height });
+    ctx.strokeRect(topLeft.x, topLeft.y, bottomRight.x - topLeft.x, bottomRight.y - topLeft.y);
   }
 
   function drawPlayer() {
@@ -1502,30 +1651,56 @@ export function createGame({ canvas, hudRoot, overlayRoot }) {
   }
 
   function drawStatusText() {
-    const wave = getCurrentWave();
-    const boss = state.enemies.find((enemy) => enemy.isBoss);
-    ctx.fillStyle = "#aeb8c6";
-    ctx.font = "16px Segoe UI";
-    ctx.fillText(`房间：${wave.label}`, 24, 36);
-    ctx.fillText(`击杀：${state.kills} | 阶段：${formatPhaseLabel(state.phase)}`, 24, 60);
-    if (boss) {
+    ctx.save();
+    ctx.textAlign = "center";
+    ctx.font = "600 18px Segoe UI";
+    ctx.fillStyle = "rgba(230, 238, 247, 0.84)";
+    ctx.fillText(getWaveLabel(getCurrentWave()), canvas.width / 2, 34);
+    if (state.lastCrit) {
+      ctx.font = "600 14px Segoe UI";
       ctx.fillStyle = "#ffd166";
-      ctx.fillText(`首领生命：${Math.max(0, Math.ceil(boss.hp))}/${boss.maxHp} | 第${boss.phase ?? 1}阶段`, 24, 84);
-      if (state.bossAnnouncement) ctx.fillText(state.bossAnnouncement, 24, 108);
-    } else if (state.lastCrit) {
-      ctx.fillStyle = "#ffd166";
-      ctx.fillText("上一发触发了暴击", 24, 84);
+      ctx.fillText("暴击触发", canvas.width / 2, 56);
+    }
+    ctx.restore();
+  }
+
+  function resizeCanvas() {
+    const targetWidth = Math.max(1280, Math.floor(canvas.clientWidth || canvas.width));
+    const targetHeight = Math.max(720, Math.floor(canvas.clientHeight || canvas.height));
+    if (canvas.width !== targetWidth || canvas.height !== targetHeight) {
+      canvas.width = targetWidth;
+      canvas.height = targetHeight;
     }
   }
 
+  function getViewUnit() {
+    const widthUnit = canvas.width / GAME_CONFIG.arena.visibleWidth;
+    const heightUnit = canvas.height / GAME_CONFIG.arena.visibleHeight;
+    return Math.min(widthUnit, heightUnit);
+  }
+
+  function getCameraPosition() {
+    const halfWidth = GAME_CONFIG.arena.visibleWidth / 2;
+    const halfHeight = GAME_CONFIG.arena.visibleHeight / 2;
+    return {
+      x: clamp(state.player.position.x, halfWidth, GAME_CONFIG.arena.width - halfWidth),
+      y: clamp(state.player.position.y, halfHeight, GAME_CONFIG.arena.height - halfHeight),
+    };
+  }
+
   function toCanvasPosition(gridPosition) {
-    return { x: GAME_CONFIG.arena.originX + gridPosition.x * GAME_CONFIG.arena.cellSize, y: GAME_CONFIG.arena.originY + gridPosition.y * GAME_CONFIG.arena.cellSize };
+    const camera = getCameraPosition();
+    const unit = getViewUnit();
+    return {
+      x: (gridPosition.x - camera.x) * unit + canvas.width / 2,
+      y: (gridPosition.y - camera.y) * unit + canvas.height / 2,
+    };
   }
 
   return game;
 }
 
-function createInitialState() {
+function createInitialState(options = {}) {
   return {
     clock: 0,
     phase: "battle",
@@ -1549,13 +1724,13 @@ function createInitialState() {
     hazards: [],
     waveBuffUsage: { red: 0, blue: 0, green: 0 },
     bossAnnouncementTimer: 0,
-    debugNoDamage: false,
+    debugNoDamage: Boolean(options.debugNoDamage),
     endlessLevel: 0,
     mainRunCleared: false,
     scheduledEffects: [],
     auras: [],
     player: {
-      position: { x: 5, y: 5 },
+      position: { x: GAME_CONFIG.arena.width / 2, y: GAME_CONFIG.arena.height / 2 },
       direction: { x: 1, y: 0 },
       hp: GAME_CONFIG.player.baseMaxHp,
       maxHp: GAME_CONFIG.player.baseMaxHp,
@@ -1600,3 +1775,7 @@ function rotateVector(vector, angle) {
   const sin = Math.sin(angle);
   return { x: vector.x * cos - vector.y * sin, y: vector.x * sin + vector.y * cos };
 }
+
+
+
+

@@ -1,11 +1,13 @@
-export const GAME_CONFIG = {
+﻿export const GAME_CONFIG = {
   arena: {
-    width: 10,
-    height: 10,
-    cellSize: 52,
-    originX: 220,
-    originY: 60,
+    width: 20,
+    height: 20,
+    cellSize: 64,
+    originX: 0,
+    originY: 0,
     playableInset: 1,
+    visibleWidth: 10,
+    visibleHeight: 6.6,
   },
   player: {
     baseMaxHp: 10,
@@ -171,21 +173,21 @@ export const SHOP_ITEM_LIBRARY = {
 };
 
 export const SKILL_LIBRARY = [
-  { id: "flare-burst", name: "????", quality: "normal", elements: ["fire"], description: "????? 6 ?????", effects: [{ type: "radialBurst", count: 6, speedScale: 0.28, color: "#ff8a5b", damage: 2 }] },
-  { id: "gale-step", name: "???", quality: "normal", elements: ["wind"], description: "4 ???????? 60%?", effects: [{ type: "timedModifier", stat: "speed", multiplier: 1.6, duration: 4 }] },
-  { id: "tidal-shell", name: "????", quality: "rare", elements: ["water", "wood"], description: "?? 2 ?????? 4 ???? 50%?", effects: [{ type: "heal", amount: 2 }, { type: "timedModifier", stat: "damageReduction", multiplier: 0.5, duration: 4 }] },
-  { id: "spark-link", name: "????", quality: "rare", elements: ["thunder"], description: "?? 3 ?????????????????", effects: [{ type: "homingShots", count: 3, damage: 3, speedScale: 1.15, color: "#d0b7ff", chainChance: 0.25 }] },
-  { id: "verdant-pulse", name: "????", quality: "epic", elements: ["wood"], description: "???? +1???? 4 ????", effects: [{ type: "increaseMaxHp", amount: 1 }, { type: "heal", amount: 4 }] },
-  { id: "monsoon-drive", name: "????", quality: "epic", elements: ["water", "wind"], description: "????? 8 ??????", effects: [{ type: "forwardSpread", count: 8, speedScale: 0.32, color: "#7ad7ff", damage: 2 }] },
-  { id: "voltaic-lattice", name: "????", quality: "epic", elements: ["thunder", "fire"], description: "8 ?????? 35%???????????", effects: [{ type: "timedModifier", stat: "fireRate", multiplier: 1.35, duration: 8 }, { type: "timedModifier", stat: "chainChance", multiplier: 1.8, duration: 8 }] },
-  { id: "perfect-overdrive", name: "????", quality: "perfect", elements: ["fire", "thunder"], description: "10 ????????????", effects: [{ type: "timedModifier", stat: "fireRate", multiplier: 1.8, duration: 10 }, { type: "timedModifier", stat: "projectileSpeed", multiplier: 1.5, duration: 10 }] },
-  { id: "ember-echo", name: "????", quality: "rare", elements: ["fire", "wind"], description: "???????????????????", effects: [{ type: "repeat", count: 2, effects: [{ type: "radialBurst", count: 5, speedScale: 0.26, color: "#ff9b67", damage: 2, splashDamage: 1, radius: 0.11 }] }] },
-  { id: "torrent-lance", name: "????", quality: "epic", elements: ["water", "thunder"], description: "??????????????????", effects: [{ type: "forwardSpread", count: 4, speedScale: 0.36, color: "#86e0ff", damage: 3, pierceLeft: 1, slowOnHit: 0.2, rangeScale: 1.1, spreadStep: 0.08 }] },
-  { id: "storm-recital", name: "????", quality: "epic", elements: ["wind", "thunder"], description: "???????????", effects: [{ type: "repeat", count: 3, effects: [{ type: "homingShots", count: 2, damage: 2, speedScale: 1.2, color: "#c6c3ff", chainChance: 0.15 }] }] },
-  { id: "evergreen-oath", name: "????", quality: "perfect", elements: ["wood", "water"], description: "???? +2??? 5 ?????? 8 ???????", effects: [{ type: "increaseMaxHp", amount: 2 }, { type: "heal", amount: 5 }, { type: "timedModifier", stat: "speed", multiplier: 1.35, duration: 8 }] },
-  { id: "frost-ward", name: "????", quality: "rare", elements: ["water", "wind"], description: "?? 4 ???????????????", effects: [{ type: "grantShield", amount: 4, duration: 5 }, { type: "pulseAura", duration: 4, interval: 0.45, radius: 1.6, damage: 1, slowOnHit: 0.3, color: "rgba(140, 225, 255, 0.18)" }] },
-  { id: "delayed-sunburst", name: "????", quality: "epic", elements: ["fire", "thunder"], description: "??????????????????", effects: [{ type: "delayedEffects", delay: 0.55, effects: [{ type: "radialBurst", count: 10, speedScale: 0.34, color: "#ffb26b", damage: 4, splashDamage: 1 }] }] },
-  { id: "sanctuary-ring", name: "????", quality: "perfect", elements: ["wood", "water"], description: "??????? 6 ???????????", effects: [{ type: "grantShield", amount: 5, duration: 6 }, { type: "pulseAura", duration: 6, interval: 0.75, radius: 1.9, damage: 1, healPerPulse: 1, color: "rgba(132, 222, 148, 0.18)" }] },
+  { id: "flare-burst", name: "灼焰迸发", quality: "normal", elements: ["fire"], description: "向周身释放 6 枚火焰爆裂弹。", effects: [{ type: "radialBurst", count: 6, speedScale: 0.28, color: "#ff8a5b", damage: 2 }] },
+  { id: "gale-step", name: "疾风步", quality: "normal", elements: ["wind"], description: "4 秒内移动速度提升 60%。", effects: [{ type: "timedModifier", stat: "speed", multiplier: 1.6, duration: 4 }] },
+  { id: "tidal-shell", name: "潮汐护壳", quality: "rare", elements: ["water", "wood"], description: "恢复 2 点生命，并在 4 秒内减伤 50%。", effects: [{ type: "heal", amount: 2 }, { type: "timedModifier", stat: "damageReduction", multiplier: 0.5, duration: 4 }] },
+  { id: "spark-link", name: "雷链追击", quality: "rare", elements: ["thunder"], description: "释放 3 枚追踪雷弹，可触发连锁。", effects: [{ type: "homingShots", count: 3, damage: 3, speedScale: 1.15, color: "#d0b7ff", chainChance: 0.25 }] },
+  { id: "verdant-pulse", name: "青木脉冲", quality: "epic", elements: ["wood"], description: "最大生命 +1，并恢复 4 点生命。", effects: [{ type: "increaseMaxHp", amount: 1 }, { type: "heal", amount: 4 }] },
+  { id: "monsoon-drive", name: "季风驱动", quality: "epic", elements: ["water", "wind"], description: "朝前方泼洒 8 枚季风弹幕。", effects: [{ type: "forwardSpread", count: 8, speedScale: 0.32, color: "#7ad7ff", damage: 2 }] },
+  { id: "voltaic-lattice", name: "伏特矩阵", quality: "epic", elements: ["thunder", "fire"], description: "8 秒内攻速提升，并强化连锁概率。", effects: [{ type: "timedModifier", stat: "fireRate", multiplier: 1.35, duration: 8 }, { type: "timedModifier", stat: "chainChance", multiplier: 1.8, duration: 8 }] },
+  { id: "perfect-overdrive", name: "极限超载", quality: "perfect", elements: ["fire", "thunder"], description: "10 秒内大幅提升攻速与弹速。", effects: [{ type: "timedModifier", stat: "fireRate", multiplier: 1.8, duration: 10 }, { type: "timedModifier", stat: "projectileSpeed", multiplier: 1.5, duration: 10 }] },
+  { id: "ember-echo", name: "余烬回响", quality: "rare", elements: ["fire", "wind"], description: "连续两次释放环形余烬爆裂。", effects: [{ type: "repeat", count: 2, effects: [{ type: "radialBurst", count: 5, speedScale: 0.26, color: "#ff9b67", damage: 2, splashDamage: 1, radius: 0.11 }] }] },
+  { id: "torrent-lance", name: "洪流穿枪", quality: "epic", elements: ["water", "thunder"], description: "射出可穿透并减速的洪流长枪。", effects: [{ type: "forwardSpread", count: 4, speedScale: 0.36, color: "#86e0ff", damage: 3, pierceLeft: 1, slowOnHit: 0.2, rangeScale: 1.1, spreadStep: 0.08 }] },
+  { id: "storm-recital", name: "风暴咏叹", quality: "epic", elements: ["wind", "thunder"], description: "连续生成多轮追踪风雷弹。", effects: [{ type: "repeat", count: 3, effects: [{ type: "homingShots", count: 2, damage: 2, speedScale: 1.2, color: "#c6c3ff", chainChance: 0.15 }] }] },
+  { id: "evergreen-oath", name: "常青誓约", quality: "perfect", elements: ["wood", "water"], description: "提升生命上限、恢复生命并短暂加速。", effects: [{ type: "increaseMaxHp", amount: 2 }, { type: "heal", amount: 5 }, { type: "timedModifier", stat: "speed", multiplier: 1.35, duration: 8 }] },
+  { id: "frost-ward", name: "霜镜护场", quality: "rare", elements: ["water", "wind"], description: "获得护盾，并在周围形成减速冰环。", effects: [{ type: "grantShield", amount: 4, duration: 5 }, { type: "pulseAura", duration: 4, interval: 0.45, radius: 1.6, damage: 1, slowOnHit: 0.3, color: "rgba(140, 225, 255, 0.18)" }] },
+  { id: "delayed-sunburst", name: "迟滞日珥", quality: "epic", elements: ["fire", "thunder"], description: "短暂延迟后爆发一圈高伤日珥。", effects: [{ type: "delayedEffects", delay: 0.55, effects: [{ type: "radialBurst", count: 10, speedScale: 0.34, color: "#ffb26b", damage: 4, splashDamage: 1 }] }] },
+  { id: "sanctuary-ring", name: "回春圣环", quality: "perfect", elements: ["wood", "water"], description: "生成护盾与持续回复光环。", effects: [{ type: "grantShield", amount: 5, duration: 6 }, { type: "pulseAura", duration: 6, interval: 0.75, radius: 1.9, damage: 1, healPerPulse: 1, color: "rgba(132, 222, 148, 0.18)" }] },
 ];
 
 function getSelectedReel(state) {
