@@ -5,6 +5,8 @@
   SHOP_ITEM_LIBRARY,
   SKILL_LIBRARY,
   WAVE_DEFINITIONS,
+  getLuckMultiplier,
+  getPlayerAttributeBase,
 } from "./config.js";
 import { clamp, distance, normalize, pickUnique, randomInt } from "./utils.js";
 
@@ -94,6 +96,12 @@ export function createGame({ canvas, hudRoot, overlayRoot, options = {} }) {
     state.pendingSkillChoices = getSkillChoicesFromCurrentRecord();
   }
 
+  function getSkillChoicesFromCurrentRecord() {
+    const filled = state.valueSlots.filter((entry) => entry !== null).length;
+    if (filled === 0) return pickUnique(SKILL_LIBRARY, 2);
+    return generateSkillChoices();
+  }
+
   function loop(time) {
     if (!running) return;
     const dt = Math.min((time - lastTime) / 1000, 0.05);
@@ -131,10 +139,9 @@ export function createGame({ canvas, hudRoot, overlayRoot, options = {} }) {
     }
 
     if (state.phase === "battle") {
-      if (state.pendingSkillChoices && input.consume("KeyQ")) equipSkill(state.pendingSkillChoices[0]);
-      if (state.pendingSkillChoices && input.consume("KeyE")) equipSkill(state.pendingSkillChoices[1]);
-      if (input.consume("KeyZ")) castEquippedSkill(0);
-      if (input.consume("KeyC")) castEquippedSkill(1);
+      if (state.pendingSkillChoices && input.consume("KeyJ")) castPendingSkill(state.pendingSkillChoices[0]);
+      if (state.pendingSkillChoices && input.consume("KeyK")) castPendingSkill(state.pendingSkillChoices[1]);
+      if (state.pendingSkillChoices && input.consume("Space")) castConfirmedSkill();
     }
 
     if (state.phase === "shop") {
@@ -184,7 +191,7 @@ export function createGame({ canvas, hudRoot, overlayRoot, options = {} }) {
     const moveY = (input.isDown("KeyS") ? 1 : 0) - (input.isDown("KeyW") ? 1 : 0);
     const hasMove = moveX !== 0 || moveY !== 0;
     const direction = hasMove ? normalize(moveX, moveY) : { x: 0, y: 0 };
-    const speed = getStat("speed", state.player.baseSpeed) + getResonanceValue("speed");
+    const speed = getStat("speed", state.player.baseSpeed);
 
     if (hasMove) state.player.direction = direction;
 
@@ -203,15 +210,17 @@ export function createGame({ canvas, hudRoot, overlayRoot, options = {} }) {
 
   function firePlayerProjectiles(dt) {
     state.player.fireCooldown -= dt;
-    const fireRate = getStat("fireRate", state.player.baseFireRate) + getResonanceValue("fireRateFlat");
+    const fireRate = getStat("fireRate", state.player.baseFireRate);
     if (state.player.fireCooldown > 0) return;
 
     const reel = state.reels[state.activeReelIndex];
     const rolledValue = randomInt(1 + (reel.bias ?? 0), reel.sides + (reel.bias ?? 0));
     const critFaces = computeCritFaces();
-    const isCrit = randomInt(1, critFaces) === Math.min(GAME_CONFIG.critical.triggerValue, critFaces);
+    const baseCritChance = 1 / critFaces;
+    const isCrit = randomInt(1, critFaces) === Math.min(GAME_CONFIG.critical.triggerValue, critFaces) || passesLuckCheck(baseCritChance);
     const damage = Math.max(1, rolledValue + getResonanceValue("flatDamage") + (isCrit ? rolledValue : 0));
     const projectileCount = 1 + getResonanceValue("bonusProjectiles");
+    const attackToken = `${state.waveIndex}-${state.clock.toFixed(4)}-${state.activeReelIndex}`;
 
     for (let index = 0; index < projectileCount; index += 1) {
       const angleOffset = projectileCount === 1 ? 0 : (index - (projectileCount - 1) / 2) * 0.16;
@@ -229,10 +238,13 @@ export function createGame({ canvas, hudRoot, overlayRoot, options = {} }) {
         slowOnHit: getResonanceValue("slowOnHit"),
         chainChance: Math.min(0.95, getResonanceValue("chainChance") * getStat("chainChance", 1)),
         color: isCrit ? "#ffd166" : "#f3f4f6",
+        sourceReelIndex: state.activeReelIndex,
+        rolledValue,
+        isCrit,
+        attackToken,
+        canRecordRoll: true,
       });
     }
-
-    recordRoll(rolledValue, isCrit);
     state.player.fireCooldown = 1 / Math.max(0.2, fireRate);
   }
 
@@ -600,6 +612,18 @@ export function createGame({ canvas, hudRoot, overlayRoot, options = {} }) {
       hazard.armLeft = Math.max(0, (hazard.armLeft ?? 0) - dt);
       if (hazard.lifetime <= 0) continue;
       if ((hazard.armLeft ?? 0) > 0) continue;
+      if (hazard.tickLeft <= 0) {
+        let enemyHit = false;
+        for (const enemy of state.enemies) {
+          if (distance(hazard.position, enemy.position) <= hazard.radius + enemy.radius) {
+            damageEnemy(enemy, hazard.damage);
+            enemyHit = true;
+          }
+        }
+        if (enemyHit) {
+          hazard.tickLeft = hazard.tickInterval;
+        }
+      }
       if (state.player.invulnerabilityLeft <= 0 && distance(hazard.position, state.player.position) <= hazard.radius + state.player.radius && hazard.tickLeft <= 0) {
         damagePlayer(hazard.damage);
         hazard.tickLeft = hazard.tickInterval;
@@ -612,10 +636,11 @@ export function createGame({ canvas, hudRoot, overlayRoot, options = {} }) {
       if (projectile.team === "player") {
         for (const enemy of state.enemies) {
           if (distance(projectile.position, enemy.position) <= projectile.radius + enemy.radius) {
-            enemy.hp -= projectile.damage;
+            damageEnemy(enemy, projectile.damage);
+            tryRecordEffectiveHit(projectile);
             if (projectile.slowOnHit) enemy.slowLeft = Math.max(enemy.slowLeft ?? 0, 1 + projectile.slowOnHit);
             if (projectile.splashDamage) splashHit(enemy.position, projectile.splashDamage, enemy);
-            if (projectile.chainChance && Math.random() < projectile.chainChance) chainHit(enemy, Math.max(1, Math.floor(projectile.damage * 0.5)));
+            if (projectile.chainChance && passesLuckCheck(projectile.chainChance)) chainHit(enemy, Math.max(1, Math.floor(projectile.damage * 0.5)));
             if ((projectile.pierceLeft ?? 0) > 0) projectile.pierceLeft -= 1; else projectile.remainingRange = 0;
             break;
           }
@@ -629,13 +654,22 @@ export function createGame({ canvas, hudRoot, overlayRoot, options = {} }) {
     for (const enemy of state.enemies) {
       if (state.player.invulnerabilityLeft <= 0 && distance(enemy.position, state.player.position) <= enemy.radius + state.player.radius) {
         damagePlayer(enemy.contactDamage);
+        damageEnemy(enemy, state.player.contactDamage ?? 1);
       }
     }
   }
 
+  function tryRecordEffectiveHit(projectile) {
+    if (!projectile.canRecordRoll || state.pendingSkillChoices) return;
+    const reelIndex = projectile.sourceReelIndex;
+    if (reelIndex == null || state.reelCycleMarks[reelIndex]) return;
+    recordRoll(reelIndex, projectile.rolledValue, projectile.isCrit);
+    projectile.canRecordRoll = false;
+  }
+
   function splashHit(center, damage, primaryTarget) {
     for (const enemy of state.enemies) {
-      if (enemy !== primaryTarget && distance(enemy.position, center) <= 0.9) enemy.hp -= damage;
+      if (enemy !== primaryTarget && distance(enemy.position, center) <= 0.9) damageEnemy(enemy, damage);
     }
   }
 
@@ -643,7 +677,11 @@ export function createGame({ canvas, hudRoot, overlayRoot, options = {} }) {
     const next = state.enemies
       .filter((enemy) => enemy !== sourceEnemy)
       .sort((a, b) => distance(a.position, sourceEnemy.position) - distance(b.position, sourceEnemy.position))[0];
-    if (next && distance(next.position, sourceEnemy.position) <= 2.6) next.hp -= damage;
+    if (next && distance(next.position, sourceEnemy.position) <= 2.6) damageEnemy(next, damage);
+  }
+
+  function damageEnemy(enemy, damage) {
+    enemy.hp -= damage;
   }
 
   function cleanupEntities() {
@@ -732,21 +770,55 @@ export function createGame({ canvas, hudRoot, overlayRoot, options = {} }) {
     state.auras = state.auras.filter((aura) => aura.remaining > 0);
   }
 
-  function recordRoll(value, isCrit) {
-    state.reels[state.activeReelIndex].lastValue = value;
+  function recordRoll(reelIndex, value, isCrit) {
+    state.reels[reelIndex].lastValue = value;
     state.lastCrit = isCrit;
     if (!state.pendingSkillChoices) {
       state.valueSlots[state.nextValueSlotIndex] = value;
+      state.valueSlotSources[state.nextValueSlotIndex] = reelIndex;
       state.nextValueSlotIndex = (state.nextValueSlotIndex + 1) % GAME_CONFIG.valueSlots;
       if (state.valueSlots.every((entry) => entry !== null)) {
         state.pendingSkillChoices = generateSkillChoices();
       }
     }
-    state.activeReelIndex = (state.activeReelIndex + 1) % state.reels.length;
+    state.reelCycleMarks[reelIndex] = true;
+    if (state.reelCycleMarks.every(Boolean)) {
+      state.reelCycleMarks = Array(state.reels.length).fill(false);
+      state.activeReelIndex = 0;
+      return;
+    }
+    state.activeReelIndex = findNextPendingReel(reelIndex);
   }
 
   function computeCritFaces() {
-    return Math.max(4, GAME_CONFIG.critical.baseFaces - new Set(state.reels.map((reel) => reel.sides)).size + 1);
+    return Math.max(4, GAME_CONFIG.critical.baseFaces - new Set(state.reels.map((reel) => reel.sides)).size);
+  }
+
+  function findNextPendingReel(startIndex) {
+    for (let offset = 1; offset <= state.reels.length; offset += 1) {
+      const candidate = (startIndex + offset) % state.reels.length;
+      if (!state.reelCycleMarks[candidate]) return candidate;
+    }
+    return 0;
+  }
+
+  function normalizeReelCycleState(resetCycle = false) {
+    if (resetCycle || state.reelCycleMarks.length !== state.reels.length) {
+      state.reelCycleMarks = Array(state.reels.length).fill(false);
+      state.activeReelIndex = 0;
+      state.valueSlots = Array(GAME_CONFIG.valueSlots).fill(null);
+      state.valueSlotSources = Array(GAME_CONFIG.valueSlots).fill(null);
+      state.nextValueSlotIndex = 0;
+      state.pendingSkillChoices = null;
+      return;
+    }
+    state.activeReelIndex = clamp(state.activeReelIndex, 0, Math.max(0, state.reels.length - 1));
+  }
+
+  function passesLuckCheck(baseChance) {
+    if (baseChance <= 0) return false;
+    const effectiveChance = Math.min(0.98, baseChance * getLuckMultiplier(getStat("luck", state.player.baseLuck)));
+    return Math.random() < effectiveChance;
   }
 
   function generateSkillChoices() {
@@ -766,7 +838,12 @@ export function createGame({ canvas, hudRoot, overlayRoot, options = {} }) {
   }
 
   function resolveLeadingElements() {
-    return [...new Set([...state.reels].sort((a, b) => b.sides - a.sides).slice(0, 2).flatMap((reel) => reel.elements))];
+    const ranked = state.valueSlots
+      .map((value, index) => ({ value, reelIndex: state.valueSlotSources[index] }))
+      .filter((entry) => entry.value !== null && entry.reelIndex !== null)
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 2);
+    return [...new Set(ranked.flatMap((entry) => state.reels[entry.reelIndex]?.elements ?? []))];
   }
 
   function formatElementLabel(element) {
@@ -902,23 +979,29 @@ export function createGame({ canvas, hudRoot, overlayRoot, options = {} }) {
     return computeResonance().bonuses[stat] ?? 0;
   }
 
-  function equipSkill(skill) {
-    if (!skill) return;
-    const slotIndex = state.skillReplaceCursor % state.equippedSkills.length;
-    state.equippedSkills[slotIndex] = skill;
-    state.skillReplaceCursor += 1;
-    state.pendingSkillChoices = null;
-  }
-
-  function castEquippedSkill(index) {
-    const skill = state.equippedSkills[index];
+  function castPendingSkill(skill) {
     if (!skill || state.phase !== "battle") return;
     castSkill(skill);
+    state.confirmedSkill = skill;
+    clearSkillCycleProgress();
+  }
+
+  function castConfirmedSkill() {
+    const skill = state.confirmedSkill;
+    if (!skill || !state.pendingSkillChoices || state.phase !== "battle") return;
+    castSkill(skill);
+    clearSkillCycleProgress();
+  }
+
+  function clearSkillCycleProgress() {
     const healOnCast = getResonanceValue("healOnCast");
     if (healOnCast > 0) healPlayer(healOnCast);
     state.pendingSkillChoices = null;
     state.valueSlots = Array(GAME_CONFIG.valueSlots).fill(null);
+    state.valueSlotSources = Array(GAME_CONFIG.valueSlots).fill(null);
     state.nextValueSlotIndex = 0;
+    state.reelCycleMarks = Array(state.reels.length).fill(false);
+    state.activeReelIndex = 0;
   }
 
   function castSkill(skill) {
@@ -1073,8 +1156,9 @@ export function createGame({ canvas, hudRoot, overlayRoot, options = {} }) {
       const success = offer.apply?.(state);
       if (success === false) return;
       state.gold -= offer.price;
-      syncResonanceDerivedStats();
+      syncDerivedPlayerState();
       clampSelectedReel();
+      normalizeReelCycleState(true);
     });
     if (input.consume("Space")) advanceFromRoom();
   }
@@ -1088,8 +1172,9 @@ export function createGame({ canvas, hudRoot, overlayRoot, options = {} }) {
       if (success === false) return;
       offer.taken = true;
       state.roomSelectionsLeft -= 1;
-      syncResonanceDerivedStats();
+      syncDerivedPlayerState();
       clampSelectedReel();
+      normalizeReelCycleState(true);
     });
     if (input.consume("Space") && state.roomSelectionsLeft <= 0) advanceFromRoom();
   }
@@ -1106,8 +1191,9 @@ export function createGame({ canvas, hudRoot, overlayRoot, options = {} }) {
         offer.taken = true;
         pickup.taken = true;
         state.roomSelectionsLeft -= 1;
-        syncResonanceDerivedStats();
+        syncDerivedPlayerState();
         clampSelectedReel();
+        normalizeReelCycleState(true);
       }
     }
     if (input.consume("Space") && state.roomSelectionsLeft <= 0) advanceFromRoom();
@@ -1175,8 +1261,9 @@ export function createGame({ canvas, hudRoot, overlayRoot, options = {} }) {
         }));
       }
     }
-    syncResonanceDerivedStats();
+    syncDerivedPlayerState();
     clampSelectedReel();
+    normalizeReelCycleState(true);
   }
 
   function getCurrentWave() {
@@ -1198,6 +1285,15 @@ export function createGame({ canvas, hudRoot, overlayRoot, options = {} }) {
     const wave = getCurrentWave();
     if (wave.endless) return `主线完成 / 无尽 ${state.endlessLevel}`;
     return `${state.waveIndex}/${getMainWaveCount()}`;
+  }
+
+  function getCurrentSkillPoolPreview() {
+    const elements = resolveLeadingElements();
+    const pool = SKILL_LIBRARY
+      .filter((skill) => elements.length === 0 || skill.elements.some((element) => elements.includes(element)))
+      .sort((a, b) => getSkillLabel(a).localeCompare(getSkillLabel(b), "zh-CN"))
+      .slice(0, 8);
+    return pool.length > 0 ? pool : SKILL_LIBRARY.slice(0, 8);
   }
 
   function buildEndlessBudget(level) {
@@ -1239,16 +1335,21 @@ export function createGame({ canvas, hudRoot, overlayRoot, options = {} }) {
     state.reels.splice(state.selectedReelIndex, 1);
     clampSelectedReel();
     if (state.activeReelIndex >= state.reels.length) state.activeReelIndex = 0;
-    syncResonanceDerivedStats();
+    syncDerivedPlayerState();
+    normalizeReelCycleState(true);
   }
 
-  function syncResonanceDerivedStats() {
+  function syncDerivedPlayerState() {
     const bonusMaxHp = getResonanceValue("bonusMaxHp");
     const targetMax = state.player.baseMaxHp + state.player.permanentMaxHpBonus + bonusMaxHp;
     if (targetMax > state.player.maxHp) state.player.hp += targetMax - state.player.maxHp;
     state.player.resonanceBonusMaxHp = bonusMaxHp;
     state.player.maxHp = targetMax;
     state.player.hp = Math.min(state.player.hp, state.player.maxHp);
+    state.player.runtimeFlatBonuses.speed = getResonanceValue("speed");
+    state.player.runtimeFlatBonuses.fireRate = getResonanceValue("fireRateFlat");
+    state.player.runtimeFlatBonuses.chainChance = getResonanceValue("chainChance");
+    state.player.runtimeFlatBonuses.luck = 0;
   }
 
   function damagePlayer(rawDamage) {
@@ -1267,7 +1368,7 @@ export function createGame({ canvas, hudRoot, overlayRoot, options = {} }) {
       return;
     }
     state.player.hp -= damage;
-    state.player.invulnerabilityLeft = state.player.baseInvulnerability;
+    state.player.invulnerabilityLeft = getStat("invulnerability", state.player.baseInvulnerability);
     if (state.player.hp <= 0) {
       state.player.hp = 0;
       state.phase = "gameover";
@@ -1280,7 +1381,7 @@ export function createGame({ canvas, hudRoot, overlayRoot, options = {} }) {
 
   function increaseMaxHp(amount) {
     state.player.permanentMaxHpBonus += amount;
-    syncResonanceDerivedStats();
+    syncDerivedPlayerState();
     state.player.hp = Math.min(state.player.maxHp, state.player.hp + amount);
   }
 
@@ -1308,12 +1409,23 @@ export function createGame({ canvas, hudRoot, overlayRoot, options = {} }) {
     });
   }
 
-  function addTimedModifier(stat, multiplier, duration) {
-    state.modifiers.push({ stat, multiplier, remaining: duration });
+  function addTimedModifier(stat, multiplier, duration, mode = "baseMultiplier") {
+    state.modifiers.push({ stat, multiplier, remaining: duration, mode });
   }
 
   function getStat(stat, baseValue) {
-    return state.modifiers.filter((entry) => entry.stat === stat).reduce((value, entry) => value * entry.multiplier, baseValue);
+    const tuning = state.player.statTuning[stat] ?? createDefaultStatTuning();
+    const modifiers = state.modifiers.filter((entry) => entry.stat === stat);
+    let baseMultiplier = tuning.baseMultiplier;
+    let extraMultiplier = tuning.extraMultiplier;
+    let globalMultiplier = tuning.globalMultiplier;
+    for (const modifier of modifiers) {
+      if (modifier.mode === "extraMultiplier") extraMultiplier *= modifier.multiplier;
+      else if (modifier.mode === "globalMultiplier") globalMultiplier *= modifier.multiplier;
+      else baseMultiplier *= modifier.multiplier;
+    }
+    const runtimeFlat = state.player.runtimeFlatBonuses[stat] ?? 0;
+    return (baseValue * baseMultiplier + (tuning.flatAdd + tuning.runtimeFlatAdd + runtimeFlat) * extraMultiplier) * globalMultiplier;
   }
 
   function spawnRadialBurst(count, speedScale, color, options = {}) {
@@ -1378,7 +1490,7 @@ export function createGame({ canvas, hudRoot, overlayRoot, options = {} }) {
       position: { ...state.player.position },
       velocity,
       speed: getStat("projectileSpeed", state.player.baseProjectileSpeed) * speedScale,
-      remainingRange: state.player.baseProjectileRange * rangeScale,
+      remainingRange: getStat("projectileRange", state.player.baseProjectileRange) * rangeScale,
       radius,
       damage,
       pierceLeft,
@@ -1438,10 +1550,9 @@ export function createGame({ canvas, hudRoot, overlayRoot, options = {} }) {
       <div class="hud-cluster hud-bottom-center">
         <div class="hud-card hud-bottom-strip">
           <div class="skill-strip">
-            ${renderSkillCard("Q", state.pendingSkillChoices?.[0], "未抽取")}
-            ${renderSkillCard("E", state.pendingSkillChoices?.[1], "未抽取")}
-            ${renderSkillCard("Z", state.equippedSkills[0], "空槽")}
-            ${renderSkillCard("C", state.equippedSkills[1], "空槽")}
+            ${renderSkillCard("J", state.pendingSkillChoices?.[0], "未抽取")}
+            ${renderSkillCard("K", state.pendingSkillChoices?.[1], "未抽取")}
+            ${renderSkillCard("空格", state.confirmedSkill, state.confirmedSkill ? "待充能" : "空槽")}
           </div>
         </div>
       </div>
@@ -1455,20 +1566,44 @@ export function createGame({ canvas, hudRoot, overlayRoot, options = {} }) {
   function updateOverlay() {
     const wave = getCurrentWave();
     if (state.phase === "shop") {
+      const possiblePool = getCurrentSkillPoolPreview();
       overlayRoot.innerHTML = `
         <div class="overlay-card">
           <h3>商店阶段</h3>
-          <div class="offer-grid">${state.shopOffers.map((offer, index) => `<div class="offer"><div class="chip">${index + 1}</div><div class="value">${getOfferLabel(offer)}</div><p>价格：${offer.price}</p><p>${getOfferDescription(offer)}</p></div>`).join("")}</div>
+          <div class="info-list">
+            <div class="dev-stat">
+              <div class="chip">当前滚筒</div>
+              <div class="offer-grid">${state.reels.map((reel, index) => `<div class="offer ${index === state.selectedReelIndex ? "selected" : ""}"><div class="value">d${reel.sides}</div><p>${formatElementList(reel.elements)}</p><p>卖价：${reel.sellPrice ?? Math.max(1, Math.floor(reel.price / 2))}</p></div>`).join("")}</div>
+            </div>
+            <div class="dev-stat">
+              <div class="chip">本店商品</div>
+              <div class="offer-grid">${state.shopOffers.map((offer, index) => `<div class="offer"><div class="chip">${index + 1}</div><div class="value">${getOfferLabel(offer)}</div><p>价格：${offer.price}</p><p>${getOfferDescription(offer)}</p></div>`).join("")}</div>
+            </div>
+            <div class="dev-stat">
+              <div class="chip">当前技能池</div>
+              <div class="grid">${possiblePool.map((skill) => `<div class="box compact"><span class="value">${getSkillLabel(skill)}</span><div class="subvalue">${skill.quality} / ${formatElementList(skill.elements)}</div></div>`).join("")}</div>
+            </div>
+          </div>
           <div class="footer-note">按 1/2/3 购买，左右方向键切换滚筒，X 售出当前滚筒，空格继续。当前金币：${state.gold}</div>
         </div>`;
       return;
     }
     if (state.phase === "reward") {
       if (wave.mode === "treasure") {
+        const possiblePool = getCurrentSkillPoolPreview();
         overlayRoot.innerHTML = `
         <div class="overlay-card">
           <h3>${getWaveLabel(wave)}</h3>
-          <div class="offer-grid">${state.roomOffers.map((offer, index) => `<div class="offer ${offer.taken ? "taken" : ""}"><div class="chip">${index + 1}</div><div class="value">${getOfferLabel(offer)}</div><p>${getOfferDescription(offer)}</p><p>${offer.taken ? "已领取" : "移动拾取"}</p></div>`).join("")}</div>
+          <div class="info-list">
+            <div class="dev-stat">
+              <div class="chip">场内奖励</div>
+              <div class="offer-grid">${state.roomOffers.map((offer, index) => `<div class="offer ${offer.taken ? "taken" : ""}"><div class="chip">${index + 1}</div><div class="value">${getOfferLabel(offer)}</div><p>${getOfferDescription(offer)}</p><p>${offer.taken ? "已领取" : "移动拾取"}</p></div>`).join("")}</div>
+            </div>
+            <div class="dev-stat">
+              <div class="chip">构筑技能池</div>
+              <div class="grid">${possiblePool.map((skill) => `<div class="box compact"><span class="value">${getSkillLabel(skill)}</span><div class="subvalue">${skill.quality} / ${formatElementList(skill.elements)}</div></div>`).join("")}</div>
+            </div>
+          </div>
           <div class="footer-note">剩余可选次数：${state.roomSelectionsLeft}。用 WASD 移动拾取奖励，拿满后按空格继续。</div>
         </div>`;
         return;
@@ -1700,6 +1835,16 @@ export function createGame({ canvas, hudRoot, overlayRoot, options = {} }) {
   return game;
 }
 
+function createDefaultStatTuning() {
+  return {
+    flatAdd: 0,
+    runtimeFlatAdd: 0,
+    baseMultiplier: 1,
+    extraMultiplier: 1,
+    globalMultiplier: 1,
+  };
+}
+
 function createInitialState(options = {}) {
   return {
     clock: 0,
@@ -1711,10 +1856,11 @@ function createInitialState(options = {}) {
     selectedReelIndex: 0,
     activeReelIndex: 0,
     valueSlots: Array(GAME_CONFIG.valueSlots).fill(null),
+    valueSlotSources: Array(GAME_CONFIG.valueSlots).fill(null),
     nextValueSlotIndex: 0,
     pendingSkillChoices: null,
-    equippedSkills: [null, null],
-    skillReplaceCursor: 0,
+    confirmedSkill: null,
+    reelCycleMarks: Array(GAME_CONFIG.reelSlots).fill(false),
     lastCrit: false,
     roomOffers: [],
     roomSelectionsLeft: 0,
@@ -1742,11 +1888,24 @@ function createInitialState(options = {}) {
       maxShield: 8,
       shieldDecayLeft: 0,
       radius: GAME_CONFIG.player.radius,
-      baseSpeed: GAME_CONFIG.player.speed,
-      baseFireRate: GAME_CONFIG.player.fireRate,
-      baseProjectileSpeed: GAME_CONFIG.player.projectileSpeed,
-      baseProjectileRange: GAME_CONFIG.player.projectileRange,
-      baseInvulnerability: GAME_CONFIG.player.invulnerability,
+      baseSpeed: getPlayerAttributeBase("moveSpeed"),
+      baseFireRate: getPlayerAttributeBase("fireRate"),
+      baseProjectileSpeed: getPlayerAttributeBase("projectileSpeed"),
+      baseProjectileRange: getPlayerAttributeBase("attackRange"),
+      baseInvulnerability: getPlayerAttributeBase("hitInvulnerability"),
+      baseLuck: getPlayerAttributeBase("luck"),
+      contactDamage: 1,
+      runtimeFlatBonuses: { speed: 0, fireRate: 0, chainChance: 0, luck: 0 },
+      statTuning: {
+        speed: createDefaultStatTuning(),
+        fireRate: createDefaultStatTuning(),
+        projectileSpeed: createDefaultStatTuning(),
+        projectileRange: createDefaultStatTuning(),
+        invulnerability: createDefaultStatTuning(),
+        damageReduction: createDefaultStatTuning(),
+        chainChance: createDefaultStatTuning(),
+        luck: createDefaultStatTuning(),
+      },
       invulnerabilityLeft: 0,
       fireCooldown: 0,
     },

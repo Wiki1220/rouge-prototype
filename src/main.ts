@@ -72,7 +72,7 @@ function renderMenu(): void {
           <div class="info-list">
             <div class="dev-stat">
               <div class="chip">当前试玩入口</div>
-              <p class="info-text">WASD 移动，Q/E 选择技能，Z/C 释放技能，商店阶段用 1/2/3 购买，= 切换测试无敌。</p>
+              <p class="info-text">WASD 移动。每累计 8 次伤害后，可在 J/K 随机技能与空格确定技能中选一次使用；使用后重新开始累计。</p>
             </div>
             <div class="dev-stat">
               <div class="chip">本轮目标</div>
@@ -138,7 +138,7 @@ function renderHelpModal(): void {
     "操作说明",
     `
       <div class="info-list">
-        <div class="dev-stat"><div class="chip">基础操作</div><p class="modal-copy">WASD 移动，Q / E 选择候选技能，Z / C 释放已装备技能。</p></div>
+        <div class="dev-stat"><div class="chip">基础操作</div><p class="modal-copy">WASD 移动。每累计满 8 次伤害后，按 J / K 使用候选随机技能，或按空格使用当前确定技能；三者只可选一次。</p></div>
         <div class="dev-stat"><div class="chip">商店与奖励</div><p class="modal-copy">商店阶段按 1 / 2 / 3 购买，左右方向键切换当前滚筒，X 售出当前滚筒。宝箱房按提示拾取或选择奖励。</p></div>
         <div class="dev-stat"><div class="chip">调试快捷键</div><p class="modal-copy">= 切换测试无敌，R 在失败或胜利后重开。</p></div>
       </div>

@@ -1,4 +1,21 @@
-﻿export const GAME_CONFIG = {
+const PLAYER_ATTRIBUTE_BASES = {
+  moveSpeed: 1,
+  fireRate: 1.7,
+  attackRange: 6.5,
+  projectileSpeed: 3,
+  hitInvulnerability: 0.5,
+  trajectorySpeed: 1.5,
+  luck: 0,
+};
+
+const ATTRIBUTE_GROWTH_MODEL = {
+  additive: "flatAdd",
+  baseMultiplier: "baseMultiplier",
+  extraMultiplier: "extraMultiplier",
+  globalMultiplier: "globalMultiplier",
+};
+
+export const GAME_CONFIG = {
   arena: {
     width: 20,
     height: 20,
@@ -11,12 +28,24 @@
   },
   player: {
     baseMaxHp: 10,
-    speed: 3.1,
-    fireRate: 2.7,
-    projectileSpeed: 7.5,
-    projectileRange: 6.2,
     radius: 0.28,
-    invulnerability: 0.5,
+    damageSource: "reelValue",
+    attributeGrowthModel: ATTRIBUTE_GROWTH_MODEL,
+    attributes: {
+      moveSpeed: { key: "moveSpeed", label: "移动速度", base: PLAYER_ATTRIBUTE_BASES.moveSpeed, description: "玩家每秒移动的距离。" },
+      fireRate: { key: "fireRate", label: "射击速度", base: PLAYER_ATTRIBUTE_BASES.fireRate, description: "玩家每秒可以发射的子弹数量。" },
+      attackRange: { key: "attackRange", label: "攻击距离", base: PLAYER_ATTRIBUTE_BASES.attackRange, description: "玩家子弹可飞行的最大距离。" },
+      projectileSpeed: { key: "projectileSpeed", label: "弹速", base: PLAYER_ATTRIBUTE_BASES.projectileSpeed, description: "玩家发射子弹每秒飞行距离。" },
+      hitInvulnerability: { key: "hitInvulnerability", label: "受击无敌时长", base: PLAYER_ATTRIBUTE_BASES.hitInvulnerability, description: "基准容错机制。" },
+      trajectorySpeed: { key: "trajectorySpeed", label: "弹道速度", base: PLAYER_ATTRIBUTE_BASES.trajectorySpeed, description: "为后续更复杂弹道机制预留的基础参数。", reserved: true },
+      luck: { key: "luck", label: "幸运", base: PLAYER_ATTRIBUTE_BASES.luck, description: "修正所有概率事件的基础属性。", probabilityMultiplierBase: 1.06 },
+    },
+    speed: PLAYER_ATTRIBUTE_BASES.moveSpeed,
+    fireRate: PLAYER_ATTRIBUTE_BASES.fireRate,
+    projectileSpeed: PLAYER_ATTRIBUTE_BASES.projectileSpeed,
+    projectileRange: PLAYER_ATTRIBUTE_BASES.attackRange,
+    invulnerability: PLAYER_ATTRIBUTE_BASES.hitInvulnerability,
+    luck: PLAYER_ATTRIBUTE_BASES.luck,
   },
   reelSlots: 4,
   valueSlots: 8,
@@ -70,6 +99,14 @@
     },
   },
 };
+
+export function getPlayerAttributeBase(attributeKey) {
+  return GAME_CONFIG.player.attributes[attributeKey]?.base ?? 0;
+}
+
+export function getLuckMultiplier(luckValue = GAME_CONFIG.player.luck) {
+  return Math.pow(GAME_CONFIG.player.attributes.luck.probabilityMultiplierBase, luckValue);
+}
 
 export const REEL_LIBRARY = [
   { id: "d4-fire", sides: 4, price: 3, sellPrice: 2, elements: ["fire"] },
@@ -161,7 +198,7 @@ export const SHOP_ITEM_LIBRARY = {
   "clone-core": { id: "clone-core", name: "裂变核心", price: 9, description: "复制当前选中滚筒的一半规模副本。", apply(state) { return cloneSelectedReel(state); } },
   "swap-element": { id: "swap-element", name: "属性改写", price: 4, description: "替换当前选中滚筒的首个元素属性。", apply(state) { return swapSelectedElement(state); } },
   "max-hp-chip": { id: "max-hp-chip", name: "生命框架", price: 7, description: "最大生命 +2，并立即恢复 2 点生命。", apply(state) { state.player.permanentMaxHpBonus += 2; state.player.hp += 2; return true; } },
-  "attack-chip": { id: "attack-chip", name: "攻击伺服", price: 7, description: "基础攻速提升 12%。", apply(state) { state.player.baseFireRate *= 1.12; return true; } },
+  "attack-chip": { id: "attack-chip", name: "攻击伺服", price: 7, description: "基础攻速提升 12%。", apply(state) { state.player.statTuning.fireRate.baseMultiplier *= 1.12; return true; } },
   "inject-fire": { id: "inject-fire", name: "火元素注入", price: 6, description: "向当前选中滚筒注入火元素。", apply(state) { return injectElement(state, "fire"); } },
   "inject-thunder": { id: "inject-thunder", name: "雷元素注入", price: 6, description: "向当前选中滚筒注入雷元素。", apply(state) { return injectElement(state, "thunder"); } },
   "inject-water": { id: "inject-water", name: "水元素注入", price: 6, description: "向当前选中滚筒注入水元素。", apply(state) { return injectElement(state, "water"); } },
@@ -169,7 +206,7 @@ export const SHOP_ITEM_LIBRARY = {
   "inject-wind": { id: "inject-wind", name: "风元素注入", price: 6, description: "向当前选中滚筒注入风元素。", apply(state) { return injectElement(state, "wind"); } },
   "rest-heal": { id: "rest-heal", name: "野战医疗舱", price: 0, description: "完全恢复生命。", apply(state) { state.player.hp = state.player.maxHp; return true; } },
   "rest-growth": { id: "rest-growth", name: "成长血清", price: 0, description: "最大生命 +3，并立即恢复 3 点生命。", apply(state) { state.player.permanentMaxHpBonus += 3; state.player.hp += 3; return true; } },
-  "rest-focus": { id: "rest-focus", name: "聚焦校准", price: 0, description: "基础攻速 +18%，弹速 +10%。", apply(state) { state.player.baseFireRate *= 1.18; state.player.baseProjectileSpeed *= 1.1; return true; } },
+  "rest-focus": { id: "rest-focus", name: "聚焦校准", price: 0, description: "基础攻速 +18%，弹速 +10%。", apply(state) { state.player.statTuning.fireRate.baseMultiplier *= 1.18; state.player.statTuning.projectileSpeed.baseMultiplier *= 1.1; return true; } },
 };
 
 export const SKILL_LIBRARY = [
@@ -188,6 +225,18 @@ export const SKILL_LIBRARY = [
   { id: "frost-ward", name: "霜镜护场", quality: "rare", elements: ["water", "wind"], description: "获得护盾，并在周围形成减速冰环。", effects: [{ type: "grantShield", amount: 4, duration: 5 }, { type: "pulseAura", duration: 4, interval: 0.45, radius: 1.6, damage: 1, slowOnHit: 0.3, color: "rgba(140, 225, 255, 0.18)" }] },
   { id: "delayed-sunburst", name: "迟滞日珥", quality: "epic", elements: ["fire", "thunder"], description: "短暂延迟后爆发一圈高伤日珥。", effects: [{ type: "delayedEffects", delay: 0.55, effects: [{ type: "radialBurst", count: 10, speedScale: 0.34, color: "#ffb26b", damage: 4, splashDamage: 1 }] }] },
   { id: "sanctuary-ring", name: "回春圣环", quality: "perfect", elements: ["wood", "water"], description: "生成护盾与持续回复光环。", effects: [{ type: "grantShield", amount: 5, duration: 6 }, { type: "pulseAura", duration: 6, interval: 0.75, radius: 1.9, damage: 1, healPerPulse: 1, color: "rgba(132, 222, 148, 0.18)" }] },
+  { id: "cinder-wheel", name: "炽轮", quality: "normal", elements: ["fire"], description: "快速释放两轮小型火环。", effects: [{ type: "repeat", count: 2, effects: [{ type: "radialBurst", count: 4, speedScale: 0.24, color: "#ff8c61", damage: 1 }] }] },
+  { id: "zephyr-cut", name: "裂风斩", quality: "normal", elements: ["wind"], description: "提速并向前切出一排风刃。", effects: [{ type: "timedModifier", stat: "speed", multiplier: 1.35, duration: 3 }, { type: "forwardSpread", count: 5, speedScale: 0.3, color: "#b9f1ff", damage: 2, spreadStep: 0.1 }] },
+  { id: "riptide-lance", name: "逆潮枪", quality: "rare", elements: ["water"], description: "射出减速并穿透的水流长枪。", effects: [{ type: "forwardSpread", count: 3, speedScale: 0.38, color: "#7fd9ff", damage: 3, pierceLeft: 1, slowOnHit: 0.25, rangeScale: 1.15, spreadStep: 0.06 }] },
+  { id: "briar-guard", name: "棘木护卫", quality: "rare", elements: ["wood"], description: "获得护盾，并在身边展开短暂荆棘环。", effects: [{ type: "grantShield", amount: 3, duration: 4 }, { type: "pulseAura", duration: 3.5, interval: 0.6, radius: 1.45, damage: 1, color: "rgba(122, 212, 126, 0.18)" }] },
+  { id: "static-swarm", name: "静电蜂群", quality: "rare", elements: ["thunder"], description: "生成 4 枚较弱但高频连锁的追踪电弹。", effects: [{ type: "homingShots", count: 4, damage: 2, speedScale: 1.05, color: "#d6c3ff", chainChance: 0.2 }] },
+  { id: "wildfire-waltz", name: "野火回旋", quality: "epic", elements: ["fire", "wind"], description: "提升攻速，并连续泼洒两轮爆燃风幕。", effects: [{ type: "timedModifier", stat: "fireRate", multiplier: 1.25, duration: 6 }, { type: "repeat", count: 2, effects: [{ type: "forwardSpread", count: 6, speedScale: 0.3, color: "#ff9a67", damage: 2, splashDamage: 1, spreadStep: 0.11 }] }] },
+  { id: "frost-tide", name: "霜潮回卷", quality: "epic", elements: ["water", "wind"], description: "回复生命，并在周围形成持续减速的寒潮。", effects: [{ type: "heal", amount: 2 }, { type: "pulseAura", duration: 5, interval: 0.5, radius: 1.8, damage: 1, slowOnHit: 0.35, color: "rgba(150, 226, 255, 0.18)" }] },
+  { id: "ironwood-bloom", name: "铁木开花", quality: "epic", elements: ["wood", "water"], description: "提升生命上限、恢复生命并获得一层护盾。", effects: [{ type: "increaseMaxHp", amount: 1 }, { type: "heal", amount: 3 }, { type: "grantShield", amount: 4, duration: 5 }] },
+  { id: "thunderhead-drive", name: "雷云推进", quality: "epic", elements: ["thunder", "wind"], description: "强化射速与弹速，并放出一组追踪雷弹。", effects: [{ type: "timedModifier", stat: "fireRate", multiplier: 1.3, duration: 6 }, { type: "timedModifier", stat: "projectileSpeed", multiplier: 1.2, duration: 6 }, { type: "homingShots", count: 3, damage: 2, speedScale: 1.25, color: "#cbc3ff", chainChance: 0.18 }] },
+  { id: "solar-corona", name: "日冕裂爆", quality: "perfect", elements: ["fire", "thunder"], description: "连续三次释放高伤火雷爆环。", effects: [{ type: "repeat", count: 3, effects: [{ type: "radialBurst", count: 8, speedScale: 0.33, color: "#ffb264", damage: 3, splashDamage: 1 }] }] },
+  { id: "worldtree-vow", name: "世界树盟约", quality: "perfect", elements: ["wood", "wind"], description: "大幅强化生存，并展开缓慢回复的守护领域。", effects: [{ type: "increaseMaxHp", amount: 2 }, { type: "grantShield", amount: 6, duration: 6 }, { type: "pulseAura", duration: 6, interval: 0.8, radius: 2, damage: 1, healPerPulse: 1, color: "rgba(136, 224, 154, 0.2)" }] },
+  { id: "tempest-halo", name: "风雷圣冕", quality: "perfect", elements: ["wind", "thunder"], description: "同时释放风幕与追踪雷弹，形成压制火力。", effects: [{ type: "forwardSpread", count: 8, speedScale: 0.34, color: "#b8eaff", damage: 2, slowOnHit: 0.12, spreadStep: 0.09 }, { type: "homingShots", count: 5, damage: 2, speedScale: 1.15, color: "#d1c7ff", chainChance: 0.3 }] },
 ];
 
 function getSelectedReel(state) {
