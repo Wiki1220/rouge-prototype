@@ -18,6 +18,7 @@ export function createGame({ canvas, hudRoot, overlayRoot, options = {} }) {
   let running = false;
 
   resizeCanvas();
+  overlayRoot.addEventListener("click", handleOverlayClick);
 
   const game = {
     start,
@@ -214,12 +215,25 @@ export function createGame({ canvas, hudRoot, overlayRoot, options = {} }) {
     if (state.player.fireCooldown > 0) return;
 
     const reel = state.reels[state.activeReelIndex];
-    const rolledValue = randomInt(1 + (reel.bias ?? 0), reel.sides + (reel.bias ?? 0));
+    const reelFaces = Array.isArray(reel.faces) && reel.faces.length > 0
+      ? reel.faces
+      : Array.from({ length: reel.sides }, (_, index) => index + 1);
+    const rolledFace = reelFaces[randomInt(0, reelFaces.length - 1)];
+    const rolledValue = rolledFace + (reel.bias ?? 0);
     const critFaces = computeCritFaces();
-    const baseCritChance = 1 / critFaces;
-    const isCrit = randomInt(1, critFaces) === Math.min(GAME_CONFIG.critical.triggerValue, critFaces) || passesLuckCheck(baseCritChance);
-    const damage = Math.max(1, rolledValue + getResonanceValue("flatDamage") + (isCrit ? rolledValue : 0));
-    const projectileCount = 1 + getResonanceValue("bonusProjectiles");
+    const isCrit = randomInt(1, critFaces) === 1;
+    const fireDoubleDamageChance = getResonanceValue("fireDoubleDamageChance");
+    const doubledByFire = fireDoubleDamageChance > 0 && Math.random() < fireDoubleDamageChance;
+    const damagePenalty = getResonanceValue("thunderDamagePenalty");
+    const damage = Math.max(1, rolledValue + getResonanceValue("flatDamage") + (isCrit ? rolledValue : 0) + (doubledByFire ? rolledValue : 0) - damagePenalty);
+    let projectileCount = 1;
+    const thunderRolls = getResonanceValue("thunderRollCount");
+    const thunderShotChance = getResonanceValue("extraProjectileChance");
+    for (let rollIndex = 0; rollIndex < thunderRolls; rollIndex += 1) {
+      if (thunderShotChance > 0 && Math.random() < thunderShotChance) {
+        projectileCount += 1;
+      }
+    }
     const attackToken = `${state.waveIndex}-${state.clock.toFixed(4)}-${state.activeReelIndex}`;
 
     for (let index = 0; index < projectileCount; index += 1) {
@@ -237,6 +251,7 @@ export function createGame({ canvas, hudRoot, overlayRoot, options = {} }) {
         splashDamage: getResonanceValue("splashDamage"),
         slowOnHit: getResonanceValue("slowOnHit"),
         chainChance: Math.min(0.95, getResonanceValue("chainChance") * getStat("chainChance", 1)),
+        controlPower: GAME_CONFIG.player.projectileControlPower,
         color: isCrit ? "#ffd166" : "#f3f4f6",
         sourceReelIndex: state.activeReelIndex,
         rolledValue,
@@ -258,6 +273,16 @@ export function createGame({ canvas, hudRoot, overlayRoot, options = {} }) {
 
   function updateEnemies(dt) {
     for (const enemy of state.enemies) {
+      enemy.frozenLeft = Math.max(0, (enemy.frozenLeft ?? 0) - dt);
+      enemy.rootedLeft = Math.max(0, (enemy.rootedLeft ?? 0) - dt);
+      enemy.slowLeft = Math.max(0, (enemy.slowLeft ?? 0) - dt);
+      enemy.chillWindowLeft = Math.max(0, (enemy.chillWindowLeft ?? 0) - dt);
+      if (enemy.chillWindowLeft <= 0) enemy.chillStacks = 0;
+      enemy.speed = enemy.baseSpeed * (enemy.slowLeft > 0 ? 0.75 : 1);
+      if (enemy.frozenLeft > 0 || enemy.rootedLeft > 0) {
+        continue;
+      }
+
       const toPlayer = {
         x: state.player.position.x - enemy.position.x,
         y: state.player.position.y - enemy.position.y,
@@ -330,8 +355,6 @@ export function createGame({ canvas, hudRoot, overlayRoot, options = {} }) {
         }
       }
 
-      enemy.slowLeft = Math.max(0, (enemy.slowLeft ?? 0) - dt);
-      enemy.speed = enemy.baseSpeed * (enemy.slowLeft > 0 ? 0.75 : 1);
     }
   }
 
@@ -636,9 +659,9 @@ export function createGame({ canvas, hudRoot, overlayRoot, options = {} }) {
       if (projectile.team === "player") {
         for (const enemy of state.enemies) {
           if (distance(projectile.position, enemy.position) <= projectile.radius + enemy.radius) {
-            damageEnemy(enemy, projectile.damage);
+            damageEnemy(enemy, projectile.damage, { slowOnHit: projectile.slowOnHit });
+            applyProjectileControl(enemy, projectile.controlPower, projectile.velocity);
             tryRecordEffectiveHit(projectile);
-            if (projectile.slowOnHit) enemy.slowLeft = Math.max(enemy.slowLeft ?? 0, 1 + projectile.slowOnHit);
             if (projectile.splashDamage) splashHit(enemy.position, projectile.splashDamage, enemy);
             if (projectile.chainChance && passesLuckCheck(projectile.chainChance)) chainHit(enemy, Math.max(1, Math.floor(projectile.damage * 0.5)));
             if ((projectile.pierceLeft ?? 0) > 0) projectile.pierceLeft -= 1; else projectile.remainingRange = 0;
@@ -669,7 +692,7 @@ export function createGame({ canvas, hudRoot, overlayRoot, options = {} }) {
 
   function splashHit(center, damage, primaryTarget) {
     for (const enemy of state.enemies) {
-      if (enemy !== primaryTarget && distance(enemy.position, center) <= 0.9) damageEnemy(enemy, damage);
+      if (enemy !== primaryTarget && distance(enemy.position, center) <= 0.9) damageEnemy(enemy, damage, { slowOnHit: getResonanceValue("slowOnHit") });
     }
   }
 
@@ -677,11 +700,40 @@ export function createGame({ canvas, hudRoot, overlayRoot, options = {} }) {
     const next = state.enemies
       .filter((enemy) => enemy !== sourceEnemy)
       .sort((a, b) => distance(a.position, sourceEnemy.position) - distance(b.position, sourceEnemy.position))[0];
-    if (next && distance(next.position, sourceEnemy.position) <= 2.6) damageEnemy(next, damage);
+    if (next && distance(next.position, sourceEnemy.position) <= 2.6) damageEnemy(next, damage, { slowOnHit: getResonanceValue("slowOnHit") });
   }
 
-  function damageEnemy(enemy, damage) {
+  function applyWaterControl(enemy, slowOnHit = 0) {
+    const waterSlow = slowOnHit > 0 ? slowOnHit : getResonanceValue("slowOnHit");
+    if (waterSlow > 0) {
+      enemy.slowLeft = Math.max(enemy.slowLeft ?? 0, 1 + waterSlow);
+    }
+    if (!getResonanceValue("waterFreezeEnabled")) return;
+    enemy.chillWindowLeft = Math.max(enemy.chillWindowLeft ?? 0, 2);
+    enemy.chillStacks = (enemy.chillStacks ?? 0) + 1;
+    if (enemy.chillStacks >= 2) {
+      enemy.frozenLeft = Math.max(enemy.frozenLeft ?? 0, 3);
+      enemy.chillStacks = 0;
+      enemy.chillWindowLeft = 0;
+    }
+  }
+
+  // Interprets projectile control power with three explicit modes:
+  // -1 disables control, 0 applies a short root, and positive values knock back on hit.
+  function applyProjectileControl(enemy, controlPower, velocity) {
+    if (controlPower == null || controlPower < 0) return;
+    if (controlPower === 0) {
+      enemy.rootedLeft = Math.max(enemy.rootedLeft ?? 0, 0.2);
+      return;
+    }
+    const direction = normalize(velocity?.x ?? 0, velocity?.y ?? 0);
+    enemy.position.x = clamp(enemy.position.x + direction.x * controlPower, 0.4, GAME_CONFIG.arena.width - 0.4);
+    enemy.position.y = clamp(enemy.position.y + direction.y * controlPower, 0.4, GAME_CONFIG.arena.height - 0.4);
+  }
+
+  function damageEnemy(enemy, damage, options = {}) {
     enemy.hp -= damage;
+    applyWaterControl(enemy, options.slowOnHit ?? 0);
   }
 
   function cleanupEntities() {
@@ -762,8 +814,7 @@ export function createGame({ canvas, hudRoot, overlayRoot, options = {} }) {
       aura.tickLeft = aura.interval;
       for (const enemy of state.enemies) {
         if (distance(enemy.position, state.player.position) > aura.radius + enemy.radius) continue;
-        enemy.hp -= aura.damage;
-        if (aura.slowOnHit) enemy.slowLeft = Math.max(enemy.slowLeft ?? 0, 0.6 + aura.slowOnHit);
+        damageEnemy(enemy, aura.damage, { slowOnHit: aura.slowOnHit });
       }
       if (aura.healPerPulse) healPlayer(aura.healPerPulse);
     }
@@ -791,7 +842,7 @@ export function createGame({ canvas, hudRoot, overlayRoot, options = {} }) {
   }
 
   function computeCritFaces() {
-    return Math.max(4, GAME_CONFIG.critical.baseFaces - new Set(state.reels.map((reel) => reel.sides)).size);
+    return Math.max(1, GAME_CONFIG.critical.baseFaces - new Set(state.reels.map((reel) => reel.sides)).size);
   }
 
   function findNextPendingReel(startIndex) {
@@ -835,6 +886,114 @@ export function createGame({ canvas, hudRoot, overlayRoot, options = {} }) {
     if (sum === 90) return ["epic", "perfect"];
     if (sum === 46) return ["rare", "normal"];
     return GAME_CONFIG.damageQualityThresholds.filter((entry) => sum >= entry.min && sum <= entry.max).map((entry) => entry.id);
+  }
+
+  function getValueSlotSum() {
+    return state.valueSlots.reduce((acc, value) => acc + (value ?? 0), 0);
+  }
+
+  function formatQualityLabel(quality) {
+    return {
+      normal: "普通",
+      rare: "稀有",
+      epic: "史诗",
+      perfect: "完美",
+    }[quality] ?? quality;
+  }
+
+  function getCurrentQualitySummary() {
+    const sum = getValueSlotSum();
+    const qualities = resolveQualities(sum);
+    return qualities.map((quality) => formatQualityLabel(quality)).join(" / ") || "未定";
+  }
+
+  function getNextQualityGoal() {
+    const sum = getValueSlotSum();
+    if (sum < 45) return "稀有 45";
+    if (sum < 68) return "史诗 68";
+    if (sum < 82) return "完美 82";
+    return "已达完美";
+  }
+
+  function buildReelDistribution() {
+    const counts = new Map();
+    for (const reel of state.reels) {
+      const faces = Array.isArray(reel.faces) && reel.faces.length > 0
+        ? reel.faces
+        : Array.from({ length: reel.sides }, (_, index) => index + 1);
+      for (const face of faces) {
+        const value = face + (reel.bias ?? 0);
+        counts.set(value, (counts.get(value) ?? 0) + 1);
+      }
+    }
+    return Array.from(counts.entries())
+      .sort((a, b) => a[0] - b[0])
+      .map(([value, count]) => ({ value, count }));
+  }
+
+  function renderDistributionChart() {
+    const distribution = buildReelDistribution();
+    if (distribution.length === 0) {
+      return `<div class="distribution-empty">暂无分布</div>`;
+    }
+    const maxCount = Math.max(...distribution.map((entry) => entry.count), 1);
+    const latestValue = state.nextValueSlotIndex > 0
+      ? state.valueSlots[state.nextValueSlotIndex - 1]
+      : state.valueSlots[state.valueSlots.length - 1];
+    return `
+      <div class="distribution-chart">
+        ${distribution.map((entry) => {
+          const height = Math.max(12, Math.round((entry.count / maxCount) * 100));
+          const activeClass = latestValue === entry.value ? " active" : "";
+          return `
+            <div class="distribution-bar${activeClass}">
+              <span class="distribution-fill" style="height: ${height}%"></span>
+              <span class="distribution-value">${entry.value}</span>
+            </div>
+          `;
+        }).join("")}
+      </div>
+    `;
+  }
+
+  function renderReelVisual(reel, selectedFaceIndex = -1) {
+    const faces = Array.isArray(reel.faces) && reel.faces.length > 0
+      ? reel.faces
+      : Array.from({ length: reel.sides }, (_, index) => index + 1);
+    if (!reel.transformLocked) {
+      return `<div class="reel-face-line">${faces.map((value, index) => index === selectedFaceIndex ? `<span class="face-chip selected">${value}</span>` : `<span class="face-chip">${value}</span>`).join("")}</div>`;
+    }
+    const splitIndex = Math.ceil(faces.length / 2);
+    const topFaces = faces.slice(0, splitIndex);
+    const bottomFaces = faces.slice(splitIndex);
+    return `
+      <div class="reel-stack">
+        <div class="reel-stack-part">${topFaces.map((value, index) => index === selectedFaceIndex ? `<span class="face-chip selected">${value}</span>` : `<span class="face-chip">${value}</span>`).join("")}</div>
+        <div class="reel-stack-part">${bottomFaces.map((value, index) => index + splitIndex === selectedFaceIndex ? `<span class="face-chip selected">${value}</span>` : `<span class="face-chip">${value}</span>`).join("")}</div>
+      </div>
+    `;
+  }
+
+  function renderQualityAxis(sum) {
+    const maxScore = 96;
+    const pointer = Math.max(0, Math.min(100, (sum / maxScore) * 100));
+    return `
+      <div class="quality-axis">
+        <div class="quality-track">
+          <span class="quality-stop normal" style="left: 0%">普通</span>
+          <span class="quality-stop rare" style="left: 46.9%">稀有</span>
+          <span class="quality-stop epic" style="left: 70.8%">史诗</span>
+          <span class="quality-stop perfect" style="left: 85.4%">完美</span>
+          <span class="quality-pointer" style="left: ${pointer}%"></span>
+        </div>
+        <div class="quality-axis-labels">
+          <span>0</span>
+          <span>45</span>
+          <span>68</span>
+          <span>82+</span>
+        </div>
+      </div>
+    `;
   }
 
   function resolveLeadingElements() {
@@ -966,12 +1125,26 @@ export function createGame({ canvas, hudRoot, overlayRoot, options = {} }) {
 
   function computeResonance() {
     const counts = countElements();
-    const bonuses = { flatDamage: 0, speed: 0, slowOnHit: 0, regen: 0, chainChance: 0, splashDamage: 0, pierceShots: 0, bonusMaxHp: 0, bonusProjectiles: 0, healOnCast: 0, fireRateFlat: 0 };
-    for (const [element, rules] of Object.entries(GAME_CONFIG.resonanceRules)) {
-      const count = counts[element] ?? 0;
-      if (rules.perStack && count >= rules.perStack.every) bonuses[rules.perStack.stat] += Math.floor(count / rules.perStack.every) * rules.perStack.amount;
-      for (const threshold of rules.thresholds ?? []) if (count >= threshold.count) bonuses[threshold.effect.stat] += threshold.effect.amount;
-    }
+    const bonuses = {
+      flatDamage: Math.floor((counts.fire ?? 0) / 3),
+      speed: Math.floor((counts.wind ?? 0) / 2) * 0.05,
+      slowOnHit: Math.floor((counts.water ?? 0) / 2) * 0.05,
+      regen: counts.wood >= 2 ? 1 : 0,
+      chainChance: 0,
+      splashDamage: counts.fire >= 9 ? 4 : 0,
+      pierceShots: counts.wind >= 9 ? 1 : 0,
+      bonusMaxHp: 0,
+      bonusProjectiles: 0,
+      healOnCast: 0,
+      fireRateFlat: Math.floor((counts.wind ?? 0) / 2) * 0.5,
+      waterFreezeEnabled: counts.water >= 6 ? 1 : 0,
+      fireDoubleDamageChance: counts.fire >= 9 ? 0.3 : 0,
+      woodOnHitHealChance: counts.wood >= 8 ? 0.1 : 0,
+      tempHpPerWave: counts.wood >= 8 ? 2 : 0,
+      extraProjectileChance: counts.thunder >= 9 ? 0.25 : counts.thunder > 0 ? 0.1 : 0,
+      thunderRollCount: counts.thunder ?? 0,
+      thunderDamagePenalty: counts.thunder >= 9 ? 2 : 0,
+    };
     return { counts, bonuses };
   }
 
@@ -1149,6 +1322,10 @@ export function createGame({ canvas, hudRoot, overlayRoot, options = {} }) {
   }
 
   function handleShopInput() {
+    if (input.consume("ArrowLeft")) moveSelectedReel(-1);
+    if (input.consume("ArrowRight")) moveSelectedReel(1);
+    if (input.consume("ArrowUp")) moveSelectedFace(-1);
+    if (input.consume("ArrowDown")) moveSelectedFace(1);
     ["Digit1", "Digit2", "Digit3"].forEach((key, index) => {
       if (!input.consume(key)) return;
       const offer = state.shopOffers[index];
@@ -1158,6 +1335,7 @@ export function createGame({ canvas, hudRoot, overlayRoot, options = {} }) {
       state.gold -= offer.price;
       syncDerivedPlayerState();
       clampSelectedReel();
+      clampSelectedFace();
       normalizeReelCycleState(true);
     });
     if (input.consume("Space")) advanceFromRoom();
@@ -1177,6 +1355,20 @@ export function createGame({ canvas, hudRoot, overlayRoot, options = {} }) {
       normalizeReelCycleState(true);
     });
     if (input.consume("Space") && state.roomSelectionsLeft <= 0) advanceFromRoom();
+  }
+
+  function canAdvanceCurrentRoom() {
+    if (state.phase === "shop") return true;
+    if (state.phase !== "reward") return false;
+    return state.roomSelectionsLeft <= 0;
+  }
+
+  function handleOverlayClick(event) {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    const action = target.closest("[data-overlay-action]")?.getAttribute("data-overlay-action");
+    if (action !== "advance-room" || !canAdvanceCurrentRoom()) return;
+    advanceFromRoom();
   }
 
   function updateTreasureRoom(dt) {
@@ -1237,9 +1429,11 @@ export function createGame({ canvas, hudRoot, overlayRoot, options = {} }) {
     targetState.pendingSkillChoices = null;
     if (wave.type === "combat") {
       targetState.phase = "battle";
+      targetState.player.tempHp = getResonanceValue("tempHpPerWave");
       const budget = wave.endless ? buildEndlessBudget(targetState.endlessLevel) : wave.budget;
       targetState.spawnQueue = budget.flatMap((entry) => Array.from({ length: entry.count }, () => entry.enemyId));
     } else {
+      targetState.player.tempHp = 0;
       targetState.phase = "reward";
       targetState.roomOffers = wave.roomOffers.map((id) => ({ ...buildOfferFromId(id), taken: false }));
       targetState.roomSelectionsLeft = wave.freeSelections ?? 1;
@@ -1322,10 +1516,29 @@ export function createGame({ canvas, hudRoot, overlayRoot, options = {} }) {
   function moveSelectedReel(delta) {
     if (state.reels.length === 0) return;
     state.selectedReelIndex = (state.selectedReelIndex + delta + state.reels.length) % state.reels.length;
+    clampSelectedFace();
+  }
+
+  function moveSelectedFace(delta) {
+    const reel = state.reels[state.selectedReelIndex];
+    const faceCount = reel?.faces?.length ?? reel?.sides ?? 0;
+    if (faceCount <= 0) return;
+    state.selectedFaceIndex = (state.selectedFaceIndex + delta + faceCount) % faceCount;
   }
 
   function clampSelectedReel() {
     state.selectedReelIndex = Math.max(0, Math.min(state.selectedReelIndex, Math.max(0, state.reels.length - 1)));
+    clampSelectedFace();
+  }
+
+  function clampSelectedFace() {
+    const reel = state.reels[state.selectedReelIndex];
+    const faceCount = reel?.faces?.length ?? reel?.sides ?? 0;
+    if (faceCount <= 0) {
+      state.selectedFaceIndex = 0;
+      return;
+    }
+    state.selectedFaceIndex = Math.max(0, Math.min(state.selectedFaceIndex, faceCount - 1));
   }
 
   function sellSelectedReel() {
@@ -1363,11 +1576,20 @@ export function createGame({ canvas, hudRoot, overlayRoot, options = {} }) {
       state.player.shield -= absorbed;
       damage -= absorbed;
     }
+    if ((state.player.tempHp ?? 0) > 0 && damage > 0) {
+      const absorbed = Math.min(state.player.tempHp, damage);
+      state.player.tempHp -= absorbed;
+      damage -= absorbed;
+    }
     if (damage <= 0) {
       state.player.invulnerabilityLeft = Math.max(state.player.invulnerabilityLeft, 0.08);
       return;
     }
     state.player.hp -= damage;
+    const woodOnHitHealChance = getResonanceValue("woodOnHitHealChance");
+    if (woodOnHitHealChance > 0 && Math.random() < woodOnHitHealChance) {
+      state.player.hp = Math.min(state.player.maxHp, state.player.hp + 1);
+    }
     state.player.invulnerabilityLeft = getStat("invulnerability", state.player.baseInvulnerability);
     if (state.player.hp <= 0) {
       state.player.hp = 0;
@@ -1441,6 +1663,7 @@ export function createGame({ canvas, hudRoot, overlayRoot, options = {} }) {
         rangeScale: options.rangeScale ?? 1,
         splashDamage: options.splashDamage ?? 0,
         pierceLeft: options.pierceLeft ?? 0,
+        controlPower: options.controlPower,
         radius: options.radius ?? 0.1,
       }));
     }
@@ -1459,6 +1682,7 @@ export function createGame({ canvas, hudRoot, overlayRoot, options = {} }) {
         rangeScale: options.rangeScale ?? 0.85,
         splashDamage: options.splashDamage ?? 0,
         pierceLeft: options.pierceLeft ?? 0,
+        controlPower: options.controlPower,
         radius: options.radius ?? 0.1,
       }));
     }
@@ -1479,12 +1703,13 @@ export function createGame({ canvas, hudRoot, overlayRoot, options = {} }) {
         rangeScale: options.rangeScale ?? 1,
         splashDamage: options.splashDamage ?? 0,
         pierceLeft: options.pierceLeft ?? 0,
+        controlPower: options.controlPower,
         radius: options.radius ?? 0.1,
       }));
     }
   }
 
-  function makePlayerProjectile({ velocity, speedScale = 1, damage, color, slowOnHit = 0, chainChance = 0, rangeScale = 1, splashDamage = 0, pierceLeft = 0, radius = 0.1 }) {
+  function makePlayerProjectile({ velocity, speedScale = 1, damage, color, slowOnHit = 0, chainChance = 0, rangeScale = 1, splashDamage = 0, pierceLeft = 0, controlPower = GAME_CONFIG.player.projectileControlPower, radius = 0.1 }) {
     return {
       team: "player",
       position: { ...state.player.position },
@@ -1497,22 +1722,28 @@ export function createGame({ canvas, hudRoot, overlayRoot, options = {} }) {
       splashDamage,
       slowOnHit,
       chainChance,
+      // Defaults to the global projectile control tuning unless a skill overrides it.
+      controlPower,
       color,
     };
   }
 
   function updateHud() {
     const resonance = computeResonance();
+    const sum = getValueSlotSum();
+    const leadingElements = resolveLeadingElements();
+    const critFaces = computeCritFaces();
     const resonanceText = Object.entries(resonance.counts)
       .filter(([, count]) => count > 0)
       .map(([element, count]) => `${formatElementLabel(element)}:${count}`)
       .join(" ") || "无";
     hudRoot.innerHTML = `
       <div class="hud-cluster hud-top-left">
-        <div class="hud-card hud-slim-card">
+      <div class="hud-card hud-slim-card">
           <div class="hud-title-row hud-inline-row">
             <span class="hud-title">状态</span>
             <span class="subvalue">HP ${state.player.hp}/${state.player.maxHp}</span>
+            ${(state.player.tempHp ?? 0) > 0 ? `<span class="subvalue">临时 ${state.player.tempHp}</span>` : ""}
             <span class="subvalue">金 ${state.gold}</span>
             ${state.debugNoDamage ? `<span class="subvalue">无敌</span>` : ""}
           </div>
@@ -1527,7 +1758,8 @@ export function createGame({ canvas, hudRoot, overlayRoot, options = {} }) {
               <div class="box compact ${(index === state.activeReelIndex ? "highlight" : "") + (index === state.selectedReelIndex && state.phase === "shop" ? " selected" : "")}">
                 <span class="label">d${reel.sides}</span>
                 <div class="value">${reel.lastValue ?? "..."}</div>
-                <div class="subvalue">${formatElementList(reel.elements)}${reel.bias ? ` | 偏置 +${reel.bias}` : ""}</div>
+                <div class="subvalue">${formatElementList(reel.elements)}${reel.bias ? ` | 偏置 +${reel.bias}` : ""}${reel.transformLocked ? " | 已变构" : ""}</div>
+                ${renderReelVisual(reel)}
               </div>`).join("")}
           </div>
         </div>
@@ -1545,6 +1777,35 @@ export function createGame({ canvas, hudRoot, overlayRoot, options = {} }) {
                 <div class="value">${value ?? "-"}</div>
               </div>`).join("")}
           </div>
+        </div>
+        <div class="hud-card hud-side-card">
+          <div class="hud-title-row">
+            <span class="hud-title">结算</span>
+            <span class="chip">${getCurrentQualitySummary()}</span>
+          </div>
+          <div class="info-stack">
+            <div class="compact-info">
+              <span class="label">当前总和</span>
+              <div class="value">${sum}</div>
+            </div>
+            <div class="compact-info">
+              <span class="label">下一目标</span>
+              <div class="subvalue">${getNextQualityGoal()}</div>
+            </div>
+            <div class="compact-info">
+              <span class="label">构筑结果</span>
+              <div class="subvalue">${leadingElements.length > 0 ? formatElementList(leadingElements) : "待记录"}</div>
+            </div>
+            <div class="compact-info">
+              <span class="label">暴击滚面</span>
+              <div class="subvalue">d${critFaces}</div>
+            </div>
+          </div>
+          <div class="compact-info">
+            <span class="label">点数分布</span>
+            ${renderDistributionChart()}
+          </div>
+          ${renderQualityAxis(sum)}
         </div>
       </div>
       <div class="hud-cluster hud-bottom-center">
@@ -1573,7 +1834,7 @@ export function createGame({ canvas, hudRoot, overlayRoot, options = {} }) {
           <div class="info-list">
             <div class="dev-stat">
               <div class="chip">当前滚筒</div>
-              <div class="offer-grid">${state.reels.map((reel, index) => `<div class="offer ${index === state.selectedReelIndex ? "selected" : ""}"><div class="value">d${reel.sides}</div><p>${formatElementList(reel.elements)}</p><p>卖价：${reel.sellPrice ?? Math.max(1, Math.floor(reel.price / 2))}</p></div>`).join("")}</div>
+              <div class="offer-grid">${state.reels.map((reel, index) => `<div class="offer ${index === state.selectedReelIndex ? "selected" : ""}"><div class="value">d${reel.sides}</div><p>${formatElementList(reel.elements)}</p>${renderReelVisual(reel, index === state.selectedReelIndex ? state.selectedFaceIndex : -1)}<p>卖价：${reel.sellPrice ?? Math.max(1, Math.floor(reel.price / 2))}</p><p>${reel.transformLocked ? "已执行过分裂/裂变" : "可继续变构"}</p></div>`).join("")}</div>
             </div>
             <div class="dev-stat">
               <div class="chip">本店商品</div>
@@ -1584,7 +1845,10 @@ export function createGame({ canvas, hudRoot, overlayRoot, options = {} }) {
               <div class="grid">${possiblePool.map((skill) => `<div class="box compact"><span class="value">${getSkillLabel(skill)}</span><div class="subvalue">${skill.quality} / ${formatElementList(skill.elements)}</div></div>`).join("")}</div>
             </div>
           </div>
-          <div class="footer-note">按 1/2/3 购买，左右方向键切换滚筒，X 售出当前滚筒，空格继续。当前金币：${state.gold}</div>
+          <div class="overlay-actions">
+            <button type="button" class="overlay-button" data-overlay-action="advance-room">准备好了，下一关</button>
+          </div>
+          <div class="footer-note">按 1/2/3 购买，左右方向键切换滚筒，上下方向键选择滚面，X 售出当前滚筒，空格继续。当前金币：${state.gold}</div>
         </div>`;
       return;
     }
@@ -1604,6 +1868,7 @@ export function createGame({ canvas, hudRoot, overlayRoot, options = {} }) {
               <div class="grid">${possiblePool.map((skill) => `<div class="box compact"><span class="value">${getSkillLabel(skill)}</span><div class="subvalue">${skill.quality} / ${formatElementList(skill.elements)}</div></div>`).join("")}</div>
             </div>
           </div>
+          ${state.roomSelectionsLeft <= 0 ? `<div class="overlay-actions"><button type="button" class="overlay-button" data-overlay-action="advance-room">离开宝箱房</button></div>` : ""}
           <div class="footer-note">剩余可选次数：${state.roomSelectionsLeft}。用 WASD 移动拾取奖励，拿满后按空格继续。</div>
         </div>`;
         return;
@@ -1612,6 +1877,7 @@ export function createGame({ canvas, hudRoot, overlayRoot, options = {} }) {
         <div class="overlay-card">
           <h3>${getWaveLabel(wave)}</h3>
           <div class="offer-grid">${state.roomOffers.map((offer, index) => `<div class="offer ${offer.taken ? "taken" : ""}"><div class="chip">${index + 1}</div><div class="value">${getOfferLabel(offer)}</div><p>${getOfferDescription(offer)}</p><p>${offer.taken ? "已领取" : "可领取"}</p></div>`).join("")}</div>
+          ${state.roomSelectionsLeft <= 0 ? `<div class="overlay-actions"><button type="button" class="overlay-button" data-overlay-action="advance-room">进入下一关</button></div>` : ""}
           <div class="footer-note">剩余可选次数：${state.roomSelectionsLeft}。按 1-${Math.min(5, state.roomOffers.length)} 领取奖励，完成后按空格继续。</div>
         </div>`;
       return;
@@ -1658,10 +1924,36 @@ export function createGame({ canvas, hudRoot, overlayRoot, options = {} }) {
     const topLeft = toCanvasPosition({ x: 0, y: 0 });
     const bottomRight = toCanvasPosition({ x: GAME_CONFIG.arena.width, y: GAME_CONFIG.arena.height });
     ctx.strokeRect(topLeft.x, topLeft.y, bottomRight.x - topLeft.x, bottomRight.y - topLeft.y);
+
+    const spawnPoint = toCanvasPosition({ x: GAME_CONFIG.arena.width / 2, y: GAME_CONFIG.arena.height / 2 });
+    ctx.save();
+    ctx.strokeStyle = "rgba(244, 247, 251, 0.45)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(spawnPoint.x - 10, spawnPoint.y);
+    ctx.lineTo(spawnPoint.x + 10, spawnPoint.y);
+    ctx.moveTo(spawnPoint.x, spawnPoint.y - 10);
+    ctx.lineTo(spawnPoint.x, spawnPoint.y + 10);
+    ctx.stroke();
+    ctx.restore();
   }
 
   function drawPlayer() {
     const position = toCanvasPosition(state.player.position);
+    if ((state.player.tempHp ?? 0) > 0) {
+      ctx.strokeStyle = "rgba(123, 226, 138, 0.85)";
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.arc(position.x, position.y, GAME_CONFIG.arena.cellSize * (state.player.radius + 0.08), 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    if (state.player.shield > 0) {
+      ctx.strokeStyle = "rgba(116, 207, 255, 0.78)";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(position.x, position.y, GAME_CONFIG.arena.cellSize * (state.player.radius + 0.15), 0, Math.PI * 2);
+      ctx.stroke();
+    }
     ctx.fillStyle = state.player.invulnerabilityLeft > 0 ? "#9cd5ff" : "#ffffff";
     ctx.beginPath();
     ctx.arc(position.x, position.y, GAME_CONFIG.arena.cellSize * state.player.radius, 0, Math.PI * 2);
@@ -1671,7 +1963,7 @@ export function createGame({ canvas, hudRoot, overlayRoot, options = {} }) {
   function drawEnemies() {
     for (const enemy of state.enemies) {
       const position = toCanvasPosition(enemy.position);
-      ctx.fillStyle = enemy.color;
+      ctx.fillStyle = enemy.frozenLeft > 0 ? "#9ee7ff" : enemy.color;
       ctx.beginPath();
       ctx.arc(position.x, position.y, GAME_CONFIG.arena.cellSize * enemy.radius, 0, Math.PI * 2);
       ctx.fill();
@@ -1683,6 +1975,19 @@ export function createGame({ canvas, hudRoot, overlayRoot, options = {} }) {
         ctx.fillStyle = "#f3f4f6";
         ctx.font = "10px Segoe UI";
         ctx.fillText(formatBuffLabel(enemy.buffTag), position.x - 5, position.y - 36);
+      }
+      if (enemy.frozenLeft > 0) {
+        ctx.fillStyle = "#d7f4ff";
+        ctx.font = "10px Segoe UI";
+        ctx.fillText("冻", position.x + 8, position.y - 36);
+      } else if ((enemy.rootedLeft ?? 0) > 0) {
+        ctx.fillStyle = "#ffe0a6";
+        ctx.font = "10px Segoe UI";
+        ctx.fillText("缚", position.x + 8, position.y - 36);
+      } else if ((enemy.chillStacks ?? 0) > 0) {
+        ctx.fillStyle = "#b8ecff";
+        ctx.font = "10px Segoe UI";
+        ctx.fillText(`迟${enemy.chillStacks}`, position.x + 4, position.y - 36);
       }
     }
   }
@@ -1796,6 +2101,16 @@ export function createGame({ canvas, hudRoot, overlayRoot, options = {} }) {
       ctx.fillStyle = "#ffd166";
       ctx.fillText("暴击触发", canvas.width / 2, 56);
     }
+    const highTierFlags = [];
+    if (getResonanceValue("waterFreezeEnabled")) highTierFlags.push("水6 冻结");
+    if (getResonanceValue("fireDoubleDamageChance") > 0) highTierFlags.push("火9 双爆");
+    if (getResonanceValue("tempHpPerWave") > 0) highTierFlags.push("木8 临时命");
+    if (getResonanceValue("extraProjectileChance") >= 0.25) highTierFlags.push("电9 追射");
+    if (highTierFlags.length > 0) {
+      ctx.font = "600 12px Segoe UI";
+      ctx.fillStyle = "rgba(180, 214, 244, 0.84)";
+      ctx.fillText(highTierFlags.join(" · "), canvas.width / 2, state.lastCrit ? 76 : 56);
+    }
     ctx.restore();
   }
 
@@ -1854,6 +2169,7 @@ function createInitialState(options = {}) {
     kills: 0,
     reels: [structuredClone(REEL_LIBRARY[0]), structuredClone(REEL_LIBRARY[1]), structuredClone(REEL_LIBRARY[2]), structuredClone(REEL_LIBRARY[3])],
     selectedReelIndex: 0,
+    selectedFaceIndex: 0,
     activeReelIndex: 0,
     valueSlots: Array(GAME_CONFIG.valueSlots).fill(null),
     valueSlotSources: Array(GAME_CONFIG.valueSlots).fill(null),
@@ -1884,6 +2200,7 @@ function createInitialState(options = {}) {
       permanentMaxHpBonus: 0,
       resonanceBonusMaxHp: 0,
       regenBuffer: 0,
+      tempHp: 0,
       shield: 0,
       maxShield: 8,
       shieldDecayLeft: 0,
@@ -1934,7 +2251,3 @@ function rotateVector(vector, angle) {
   const sin = Math.sin(angle);
   return { x: vector.x * cos - vector.y * sin, y: vector.x * sin + vector.y * cos };
 }
-
-
-
-

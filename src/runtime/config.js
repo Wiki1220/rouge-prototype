@@ -1,12 +1,18 @@
 const PLAYER_ATTRIBUTE_BASES = {
   moveSpeed: 1,
-  fireRate: 1.7,
-  attackRange: 6.5,
-  projectileSpeed: 3,
+  fireRate: 1.35,
+  attackRange: 6,
+  projectileSpeed: 1.5,
   hitInvulnerability: 0.5,
   trajectorySpeed: 1.5,
   luck: 0,
 };
+
+// Projectile control semantics:
+// -1: disable control entirely
+//  0: no knockback, apply a 0.2s root on hit
+// >0: knock the hit target back by that distance
+const PLAYER_PROJECTILE_CONTROL_POWER = 0;
 
 const ATTRIBUTE_GROWTH_MODEL = {
   additive: "flatAdd",
@@ -17,14 +23,14 @@ const ATTRIBUTE_GROWTH_MODEL = {
 
 export const GAME_CONFIG = {
   arena: {
-    width: 20,
-    height: 20,
+    width: 10,
+    height: 10,
     cellSize: 64,
     originX: 0,
     originY: 0,
     playableInset: 1,
     visibleWidth: 10,
-    visibleHeight: 6.6,
+    visibleHeight: 6,
   },
   player: {
     baseMaxHp: 10,
@@ -46,6 +52,7 @@ export const GAME_CONFIG = {
     projectileRange: PLAYER_ATTRIBUTE_BASES.attackRange,
     invulnerability: PLAYER_ATTRIBUTE_BASES.hitInvulnerability,
     luck: PLAYER_ATTRIBUTE_BASES.luck,
+    projectileControlPower: PLAYER_PROJECTILE_CONTROL_POWER,
   },
   reelSlots: 4,
   valueSlots: 8,
@@ -108,78 +115,94 @@ export function getLuckMultiplier(luckValue = GAME_CONFIG.player.luck) {
   return Math.pow(GAME_CONFIG.player.attributes.luck.probabilityMultiplierBase, luckValue);
 }
 
+function createSequentialFaces(sides) {
+  return Array.from({ length: sides }, (_, index) => index + 1);
+}
+
+function createReelEntry({ id, sides, price, sellPrice, elements }) {
+  return {
+    id,
+    sides,
+    price,
+    sellPrice,
+    elements,
+    faces: createSequentialFaces(sides),
+    transformLocked: false,
+  };
+}
+
 export const REEL_LIBRARY = [
-  { id: "d4-fire", sides: 4, price: 3, sellPrice: 2, elements: ["fire"] },
-  { id: "d6-water", sides: 6, price: 4, sellPrice: 2, elements: ["water"] },
-  { id: "d8-wind", sides: 8, price: 5, sellPrice: 3, elements: ["wind"] },
-  { id: "d10-wood", sides: 10, price: 9, sellPrice: 4, elements: ["wood"] },
-  { id: "d12-thunder", sides: 12, price: 13, sellPrice: 6, elements: ["thunder"] },
-  { id: "d12-firewind", sides: 12, price: 14, sellPrice: 7, elements: ["fire", "wind"] },
-  { id: "d14-waterwood", sides: 14, price: 17, sellPrice: 8, elements: ["water", "wood"] },
-  { id: "d16-thunderfire", sides: 16, price: 22, sellPrice: 10, elements: ["thunder", "fire"] },
-  { id: "d18-windthunder", sides: 18, price: 27, sellPrice: 12, elements: ["wind", "thunder"] },
-  { id: "d20-firewood", sides: 20, price: 32, sellPrice: 14, elements: ["fire", "wood"] },
+  createReelEntry({ id: "d4-fire", sides: 4, price: 3, sellPrice: 5, elements: ["fire"] }),
+  createReelEntry({ id: "d6-water", sides: 6, price: 4, sellPrice: 5, elements: ["water"] }),
+  createReelEntry({ id: "d8-wind", sides: 8, price: 5, sellPrice: 5, elements: ["wind"] }),
+  createReelEntry({ id: "d10-wood", sides: 10, price: 9, sellPrice: 8, elements: ["wood"] }),
+  createReelEntry({ id: "d12-thunder", sides: 12, price: 13, sellPrice: 11, elements: ["thunder"] }),
+  createReelEntry({ id: "d12-firewind", sides: 12, price: 13, sellPrice: 11, elements: ["fire", "wind"] }),
+  createReelEntry({ id: "d14-waterwood", sides: 14, price: 17, sellPrice: 12, elements: ["water", "wood"] }),
+  createReelEntry({ id: "d16-thunderfire", sides: 16, price: 22, sellPrice: 13, elements: ["thunder", "fire"] }),
+  createReelEntry({ id: "d18-windthunder", sides: 18, price: 27, sellPrice: 14, elements: ["wind", "thunder"] }),
+  createReelEntry({ id: "d20-firewood", sides: 20, price: 32, sellPrice: 15, elements: ["fire", "wood"] }),
 ];
 
 export const ENEMY_ARCHETYPES = {
-  bruiser: { id: "bruiser", name: "重甲怪", color: "#df7d61", radius: 0.34, maxHp: 12, speed: 1.1, contactDamage: 1, rewardGold: 1, preferredRange: 0.4 },
-  runner: { id: "runner", name: "迅行怪", color: "#f3c969", radius: 0.22, maxHp: 6, speed: 1.7, contactDamage: 1, rewardGold: 1, preferredRange: 0.2 },
+  bruiser: { id: "bruiser", name: "重甲怪", color: "#df7d61", radius: 0.34, maxHp: 12, speed: 0.77, contactDamage: 1, rewardGold: 1, preferredRange: 0.4 },
+  runner: { id: "runner", name: "迅行怪", color: "#f3c969", radius: 0.22, maxHp: 6, speed: 1.19, contactDamage: 1, rewardGold: 1, preferredRange: 0.2 },
   turret: {
-    id: "turret", name: "炮台怪", color: "#7ab7ff", radius: 0.28, maxHp: 8, speed: 0.2, contactDamage: 1, rewardGold: 1, preferredRange: 4.8,
+    id: "turret", name: "炮台怪", color: "#7ab7ff", radius: 0.28, maxHp: 8, speed: 0.14, contactDamage: 1, rewardGold: 1, preferredRange: 4.8,
     projectile: { cooldown: 1.8, speed: 4.2, radius: 0.1, range: 6.8, damage: 1, color: "#89c2ff" },
   },
   sniper: {
-    id: "sniper", name: "狙击怪", color: "#c18cff", radius: 0.24, maxHp: 7, speed: 0.6, contactDamage: 1, rewardGold: 2, preferredRange: 6,
+    id: "sniper", name: "狙击怪", color: "#c18cff", radius: 0.24, maxHp: 7, speed: 0.42, contactDamage: 1, rewardGold: 2, preferredRange: 6,
     projectile: { cooldown: 1.2, speed: 6.4, radius: 0.09, range: 8.5, damage: 1, color: "#d0b7ff" },
   },
   trail: {
-    id: "trail", name: "蚀痕怪", color: "#6bd18c", radius: 0.26, maxHp: 9, speed: 1.0, contactDamage: 1, rewardGold: 1, preferredRange: 0.25,
+    id: "trail", name: "蚀痕怪", color: "#6bd18c", radius: 0.26, maxHp: 9, speed: 0.7, contactDamage: 1, rewardGold: 1, preferredRange: 0.25,
     trailHazard: { color: "rgba(98, 214, 146, 0.42)", tickInterval: 0.5, lifetime: 2, damage: 1, spawnInterval: 0.24 },
   },
   ember: {
-    id: "ember", name: "余烬怪", color: "#ff935c", radius: 0.28, maxHp: 10, speed: 0.95, contactDamage: 1, rewardGold: 1, preferredRange: 2.1,
+    id: "ember", name: "余烬怪", color: "#ff935c", radius: 0.28, maxHp: 10, speed: 0.665, contactDamage: 1, rewardGold: 1, preferredRange: 2.1,
     trailHazard: { color: "rgba(255, 124, 79, 0.4)", tickInterval: 0.35, lifetime: 1.8, damage: 1, spawnInterval: 0.28, radius: 0.26, type: "fire" },
   },
   eliteDash: {
-    id: "eliteDash", name: "冲锋精英", color: "#ff8c61", radius: 0.34, maxHp: 22, speed: 1.2, contactDamage: 1, rewardGold: 4, preferredRange: 0.35,
+    id: "eliteDash", name: "冲锋精英", color: "#ff8c61", radius: 0.34, maxHp: 22, speed: 0.84, contactDamage: 1, rewardGold: 4, preferredRange: 0.35,
     dash: { cooldown: 1.6, duration: 0.2, speed: 5.6 },
   },
   eliteNest: {
-    id: "eliteNest", name: "裂巢精英", color: "#b37dff", radius: 0.38, maxHp: 26, speed: 0.85, contactDamage: 1, rewardGold: 4, preferredRange: 0.4,
+    id: "eliteNest", name: "裂巢精英", color: "#b37dff", radius: 0.38, maxHp: 26, speed: 0.595, contactDamage: 1, rewardGold: 4, preferredRange: 0.4,
     deathSpawn: [{ enemyId: "runner", count: 2 }, { enemyId: "trail", count: 1 }],
   },
   eliteRevive: {
-    id: "eliteRevive", name: "复生精英", color: "#7fd9a8", radius: 0.36, maxHp: 20, speed: 1.0, contactDamage: 1, rewardGold: 4, preferredRange: 0.3,
+    id: "eliteRevive", name: "复生精英", color: "#7fd9a8", radius: 0.36, maxHp: 20, speed: 0.7, contactDamage: 1, rewardGold: 4, preferredRange: 0.3,
     reviveOnce: { hpRatio: 0.45, color: "#d8f7b8" },
   },
-  elite: { id: "elite", name: "精英卫士", color: "#ff6f91", radius: 0.36, maxHp: 24, speed: 1.15, contactDamage: 2, rewardGold: 4, preferredRange: 0.3 },
+  elite: { id: "elite", name: "精英卫士", color: "#ff6f91", radius: 0.36, maxHp: 24, speed: 0.805, contactDamage: 2, rewardGold: 4, preferredRange: 0.3 },
   boss: {
-    id: "boss", name: "监察者", color: "#ffb84d", radius: 0.46, maxHp: 92, speed: 0.75, contactDamage: 1, rewardGold: 12, preferredRange: 4.4, isBoss: true,
+    id: "boss", name: "监察者", color: "#ffb84d", radius: 0.46, maxHp: 92, speed: 0.525, contactDamage: 1, rewardGold: 12, preferredRange: 4.4, isBoss: true,
     projectile: { cooldown: 1.5, speed: 5.2, radius: 0.1, range: 8.8, damage: 2, color: "#ffd166", burstCount: 5, spread: 0.22 },
   },
   finalBoss: {
-    id: "finalBoss", name: "王冠核心", color: "#ff5d73", radius: 0.52, maxHp: 148, speed: 0.82, contactDamage: 2, rewardGold: 20, preferredRange: 5.2, isBoss: true,
+    id: "finalBoss", name: "王冠核心", color: "#ff5d73", radius: 0.52, maxHp: 148, speed: 0.574, contactDamage: 2, rewardGold: 20, preferredRange: 5.2, isBoss: true,
     projectile: { cooldown: 1.25, speed: 5.8, radius: 0.11, range: 9.2, damage: 2, color: "#ff8ca1", burstCount: 7, spread: 0.18 },
   },
 };
 
 export const WAVE_DEFINITIONS = [
   { id: 1, type: "combat", label: "第1波：开局冲突", budget: [{ enemyId: "bruiser", count: 4 }, { enemyId: "runner", count: 2 }], shopOffers: ["d6-water", "d8-wind", "heal-small"] },
-  { id: 2, type: "combat", label: "第2波：试探压迫", budget: [{ enemyId: "bruiser", count: 5 }, { enemyId: "runner", count: 3 }], shopOffers: ["d8-wind", "bias-chip", "inject-fire"] },
-  { id: 3, type: "combat", label: "第3波：远程介入", budget: [{ enemyId: "bruiser", count: 4 }, { enemyId: "runner", count: 4 }, { enemyId: "turret", count: 1 }], shopOffers: ["d10-wood", "heal-small", "inject-water"] },
-  { id: 4, type: "combat", label: "第4波：火力试炼", budget: [{ enemyId: "bruiser", count: 6 }, { enemyId: "runner", count: 4 }, { enemyId: "turret", count: 2 }], shopOffers: ["d12-thunder", "attack-chip", "inject-wind"] },
+  { id: 2, type: "combat", label: "第2波：试探压迫", budget: [{ enemyId: "bruiser", count: 5 }, { enemyId: "runner", count: 3 }], shopOffers: ["d8-wind", "bias-chip", "heal-small"] },
+  { id: 3, type: "combat", label: "第3波：远程介入", budget: [{ enemyId: "bruiser", count: 4 }, { enemyId: "runner", count: 4 }, { enemyId: "turret", count: 1 }], shopOffers: ["d10-wood", "heal-small", "swap-element"] },
+  { id: 4, type: "combat", label: "第4波：火力试炼", budget: [{ enemyId: "bruiser", count: 6 }, { enemyId: "runner", count: 4 }, { enemyId: "turret", count: 2 }], shopOffers: ["d12-thunder", "attack-chip", "swap-element"] },
   { id: 5, type: "combat", label: "第5波：首个精英", budget: [{ enemyId: "eliteDash", count: 1 }, { enemyId: "runner", count: 5 }, { enemyId: "turret", count: 2 }], shopOffers: ["d12-firewind", "heal-large", "bias-chip"] },
-  { id: 6, type: "combat", label: "第6波：酸蚀追猎", budget: [{ enemyId: "bruiser", count: 6 }, { enemyId: "runner", count: 4 }, { enemyId: "trail", count: 2 }, { enemyId: "sniper", count: 1 }], shopOffers: ["d14-waterwood", "inject-wood", "reroll-core"] },
-  { id: 7, type: "combat", label: "第7波：多线火网", budget: [{ enemyId: "bruiser", count: 5 }, { enemyId: "runner", count: 4 }, { enemyId: "turret", count: 2 }, { enemyId: "sniper", count: 1 }], shopOffers: ["d14-waterwood", "max-hp-chip", "inject-thunder"] },
+  { id: 6, type: "combat", label: "第6波：酸蚀追猎", budget: [{ enemyId: "bruiser", count: 6 }, { enemyId: "runner", count: 4 }, { enemyId: "trail", count: 2 }, { enemyId: "sniper", count: 1 }], shopOffers: ["d14-waterwood", "max-hp-chip", "swap-element"] },
+  { id: 7, type: "combat", label: "第7波：多线火网", budget: [{ enemyId: "bruiser", count: 5 }, { enemyId: "runner", count: 4 }, { enemyId: "turret", count: 2 }, { enemyId: "sniper", count: 1 }], shopOffers: ["d14-waterwood", "attack-chip", "swap-element"] },
   { id: 8, type: "combat", label: "第8波：正面碾压", budget: [{ enemyId: "bruiser", count: 8 }, { enemyId: "runner", count: 6 }, { enemyId: "turret", count: 2 }], shopOffers: ["d16-thunderfire", "heal-large", "reroll-core"] },
-  { id: 9, type: "combat", label: "第9波：狙击压制", budget: [{ enemyId: "bruiser", count: 6 }, { enemyId: "runner", count: 6 }, { enemyId: "sniper", count: 2 }], shopOffers: ["d16-thunderfire", "inject-fire", "swap-element"] },
-  { id: 10, type: "combat", label: "第10波：裂巢来袭", budget: [{ enemyId: "eliteNest", count: 1 }, { enemyId: "turret", count: 3 }, { enemyId: "sniper", count: 2 }, { enemyId: "runner", count: 4 }], shopOffers: ["d18-windthunder", "split-core", "attack-chip"] },
-  { id: 11, type: "combat", label: "第11波：重压推进", budget: [{ enemyId: "bruiser", count: 9 }, { enemyId: "runner", count: 5 }, { enemyId: "turret", count: 2 }], shopOffers: ["d18-windthunder", "max-hp-chip", "inject-water"] },
-  { id: 12, type: "combat", label: "第12波：酸雾缠斗", budget: [{ enemyId: "bruiser", count: 5 }, { enemyId: "runner", count: 5 }, { enemyId: "trail", count: 3 }, { enemyId: "sniper", count: 3 }], shopOffers: ["d20-firewood", "clone-core", "swap-element"] },
+  { id: 9, type: "combat", label: "第9波：狙击压制", budget: [{ enemyId: "bruiser", count: 6 }, { enemyId: "runner", count: 6 }, { enemyId: "sniper", count: 2 }], shopOffers: ["d16-thunderfire", "reroll-core", "swap-element"] },
+  { id: 10, type: "combat", label: "第10波：裂巢来袭", budget: [{ enemyId: "eliteNest", count: 1 }, { enemyId: "turret", count: 3 }, { enemyId: "sniper", count: 2 }, { enemyId: "runner", count: 4 }], shopOffers: ["d18-windthunder", "attack-chip", "swap-element"] },
+  { id: 11, type: "combat", label: "第11波：重压推进", budget: [{ enemyId: "bruiser", count: 9 }, { enemyId: "runner", count: 5 }, { enemyId: "turret", count: 2 }], shopOffers: ["d18-windthunder", "inject-water", "inject-thunder"] },
+  { id: 12, type: "combat", label: "第12波：酸雾缠斗", budget: [{ enemyId: "bruiser", count: 5 }, { enemyId: "runner", count: 5 }, { enemyId: "trail", count: 3 }, { enemyId: "sniper", count: 3 }], shopOffers: ["d20-firewood", "inject-fire", "inject-wood"] },
   { id: 13, type: "combat", label: "第13波：复生围猎", budget: [{ enemyId: "eliteRevive", count: 1 }, { enemyId: "bruiser", count: 6 }, { enemyId: "runner", count: 6 }], shopOffers: ["d20-firewood", "split-core", "clone-core"] },
   { id: 14, type: "combat", label: "第14波：总攻前夜", budget: [{ enemyId: "bruiser", count: 8 }, { enemyId: "runner", count: 6 }, { enemyId: "turret", count: 3 }, { enemyId: "sniper", count: 2 }, { enemyId: "ember", count: 2 }], shopOffers: ["d20-firewood", "heal-large", "inject-thunder"] },
   { id: 15, type: "combat", label: "第15波：监察者降临", budget: [{ enemyId: "boss", count: 1 }, { enemyId: "runner", count: 4 }], shopOffers: [] },
-  { id: 16, type: "reward", mode: "treasure", label: "第16波：宝箱回廊", freeSelections: 2, roomOffers: ["d16-thunderfire", "d18-windthunder", "split-core", "clone-core", "swap-element"] },
+  { id: 16, type: "reward", mode: "treasure", label: "第16波：宝箱回廊", freeSelections: 2, roomOffers: ["d16-thunderfire", "d18-windthunder", "split-core", "clone-core", "inject-fire"] },
   { id: 17, type: "combat", label: "第17波：余烬反扑", budget: [{ enemyId: "bruiser", count: 9 }, { enemyId: "runner", count: 7 }, { enemyId: "turret", count: 2 }], shopOffers: ["d18-windthunder", "attack-chip", "inject-wood"] },
   { id: 18, type: "combat", label: "第18波：蚀地风暴", budget: [{ enemyId: "bruiser", count: 6 }, { enemyId: "runner", count: 6 }, { enemyId: "trail", count: 4 }, { enemyId: "ember", count: 3 }, { enemyId: "sniper", count: 3 }, { enemyId: "turret", count: 2 }], shopOffers: ["d20-firewood", "heal-large", "reroll-core"] },
   { id: 19, type: "combat", label: "第19波：双精英会战", budget: [{ enemyId: "eliteDash", count: 1 }, { enemyId: "eliteRevive", count: 1 }, { enemyId: "runner", count: 6 }, { enemyId: "sniper", count: 2 }], shopOffers: ["d20-firewood", "max-hp-chip", "swap-element"] },
@@ -193,17 +216,17 @@ export const SHOP_ITEM_LIBRARY = {
   "heal-small": { id: "heal-small", name: "修复胶囊", price: 4, description: "恢复 3 点生命。", apply(state) { state.player.hp = Math.min(state.player.maxHp, state.player.hp + 3); } },
   "heal-large": { id: "heal-large", name: "紧急治疗", price: 6, description: "恢复 5 点生命。", apply(state) { state.player.hp = Math.min(state.player.maxHp, state.player.hp + 5); } },
   "bias-chip": { id: "bias-chip", name: "偏置芯片", price: 5, description: "当前选中滚筒的点数偏置 +1。", apply(state) { const reel = getSelectedReel(state); if (!reel) return false; reel.bias = (reel.bias ?? 0) + 1; return true; } },
-  "reroll-core": { id: "reroll-core", name: "重铸核心", price: 7, description: "将当前选中滚筒重铸为随机新滚筒。", apply(state) { const source = REEL_LIBRARY[Math.floor(Math.random() * REEL_LIBRARY.length)]; const index = getSelectedReelIndex(state); if (index < 0) return false; state.reels[index] = structuredClone(source); return true; } },
-  "split-core": { id: "split-core", name: "分裂核心", price: 8, description: "将当前选中滚筒拆分成两个较小滚筒。", apply(state) { return splitSelectedReel(state); } },
-  "clone-core": { id: "clone-core", name: "裂变核心", price: 9, description: "复制当前选中滚筒的一半规模副本。", apply(state) { return cloneSelectedReel(state); } },
+  "reroll-core": { id: "reroll-core", name: "重刷滚面", price: 8, description: "将当前选中滚筒的一张指定滚面重刷为新的随机数值。", apply(state) { return rerollSelectedFace(state); } },
+  "split-core": { id: "split-core", name: "分裂核心", price: 14, description: "将当前选中滚筒的所有滚面均分到两个较小滚筒中。", apply(state) { return splitSelectedReel(state); } },
+  "clone-core": { id: "clone-core", name: "裂变核心", price: 14, description: "将当前选中滚筒替换成两个由较小滚面组成的新滚筒。", apply(state) { return cloneSelectedReel(state); } },
   "swap-element": { id: "swap-element", name: "属性改写", price: 4, description: "替换当前选中滚筒的首个元素属性。", apply(state) { return swapSelectedElement(state); } },
   "max-hp-chip": { id: "max-hp-chip", name: "生命框架", price: 7, description: "最大生命 +2，并立即恢复 2 点生命。", apply(state) { state.player.permanentMaxHpBonus += 2; state.player.hp += 2; return true; } },
   "attack-chip": { id: "attack-chip", name: "攻击伺服", price: 7, description: "基础攻速提升 12%。", apply(state) { state.player.statTuning.fireRate.baseMultiplier *= 1.12; return true; } },
-  "inject-fire": { id: "inject-fire", name: "火元素注入", price: 6, description: "向当前选中滚筒注入火元素。", apply(state) { return injectElement(state, "fire"); } },
-  "inject-thunder": { id: "inject-thunder", name: "雷元素注入", price: 6, description: "向当前选中滚筒注入雷元素。", apply(state) { return injectElement(state, "thunder"); } },
-  "inject-water": { id: "inject-water", name: "水元素注入", price: 6, description: "向当前选中滚筒注入水元素。", apply(state) { return injectElement(state, "water"); } },
-  "inject-wood": { id: "inject-wood", name: "木元素注入", price: 6, description: "向当前选中滚筒注入木元素。", apply(state) { return injectElement(state, "wood"); } },
-  "inject-wind": { id: "inject-wind", name: "风元素注入", price: 6, description: "向当前选中滚筒注入风元素。", apply(state) { return injectElement(state, "wind"); } },
+  "inject-fire": { id: "inject-fire", name: "火元素注入", price: 8, description: "向当前选中滚筒注入火元素。", apply(state) { return injectElement(state, "fire"); } },
+  "inject-thunder": { id: "inject-thunder", name: "雷元素注入", price: 8, description: "向当前选中滚筒注入雷元素。", apply(state) { return injectElement(state, "thunder"); } },
+  "inject-water": { id: "inject-water", name: "水元素注入", price: 8, description: "向当前选中滚筒注入水元素。", apply(state) { return injectElement(state, "water"); } },
+  "inject-wood": { id: "inject-wood", name: "木元素注入", price: 8, description: "向当前选中滚筒注入木元素。", apply(state) { return injectElement(state, "wood"); } },
+  "inject-wind": { id: "inject-wind", name: "风元素注入", price: 8, description: "向当前选中滚筒注入风元素。", apply(state) { return injectElement(state, "wind"); } },
   "rest-heal": { id: "rest-heal", name: "野战医疗舱", price: 0, description: "完全恢复生命。", apply(state) { state.player.hp = state.player.maxHp; return true; } },
   "rest-growth": { id: "rest-growth", name: "成长血清", price: 0, description: "最大生命 +3，并立即恢复 3 点生命。", apply(state) { state.player.permanentMaxHpBonus += 3; state.player.hp += 3; return true; } },
   "rest-focus": { id: "rest-focus", name: "聚焦校准", price: 0, description: "基础攻速 +18%，弹速 +10%。", apply(state) { state.player.statTuning.fireRate.baseMultiplier *= 1.18; state.player.statTuning.projectileSpeed.baseMultiplier *= 1.1; return true; } },
@@ -258,15 +281,44 @@ function injectElement(state, element) {
   return true;
 }
 
+function rerollSelectedFace(state) {
+  const reel = getSelectedReel(state);
+  if (!reel || !Array.isArray(reel.faces) || reel.faces.length === 0) return false;
+  const faceIndex = Math.max(0, Math.min(state.selectedFaceIndex ?? 0, reel.faces.length - 1));
+  const currentValue = reel.faces[faceIndex];
+  const pool = createSequentialFaces(reel.sides).filter((value) => value !== currentValue);
+  if (pool.length === 0) return false;
+  reel.faces[faceIndex] = pool[Math.floor(Math.random() * pool.length)];
+  return true;
+}
+
 function splitSelectedReel(state) {
   const index = getSelectedReelIndex(state);
   if (index < 0 || state.reels.length >= GAME_CONFIG.maxReels) return false;
   const reel = state.reels[index];
-  if (reel.sides <= 4) return false;
-  const leftSides = Math.max(4, Math.floor(reel.sides / 2));
-  const rightSides = Math.max(4, reel.sides - leftSides);
-  const left = { ...structuredClone(reel), id: `${reel.id}-split-a-${Date.now()}`, sides: leftSides, sellPrice: Math.max(1, Math.floor(reel.sellPrice / 2)) };
-  const right = { ...structuredClone(reel), id: `${reel.id}-split-b-${Date.now()}`, sides: rightSides, sellPrice: Math.max(1, Math.ceil(reel.sellPrice / 2)) };
+  if (reel.sides <= 4 || reel.transformLocked) return false;
+  const sourceFaces = Array.isArray(reel.faces) && reel.faces.length > 0 ? reel.faces : createSequentialFaces(reel.sides);
+  if (sourceFaces.length <= 4) return false;
+  const splitPoint = Math.floor(sourceFaces.length / 2);
+  const leftFaces = sourceFaces.slice(0, splitPoint);
+  const rightFaces = sourceFaces.slice(splitPoint);
+  if (leftFaces.length < 4 || rightFaces.length < 4) return false;
+  const left = {
+    ...structuredClone(reel),
+    id: `${reel.id}-split-a-${Date.now()}`,
+    sides: leftFaces.length,
+    faces: leftFaces,
+    transformLocked: true,
+    sellPrice: Math.floor(reel.sellPrice / 2),
+  };
+  const right = {
+    ...structuredClone(reel),
+    id: `${reel.id}-split-b-${Date.now()}`,
+    sides: rightFaces.length,
+    faces: rightFaces,
+    transformLocked: true,
+    sellPrice: Math.ceil(reel.sellPrice / 2),
+  };
   state.reels.splice(index, 1, left, right);
   return true;
 }
@@ -275,9 +327,28 @@ function cloneSelectedReel(state) {
   const index = getSelectedReelIndex(state);
   if (index < 0 || state.reels.length >= GAME_CONFIG.maxReels) return false;
   const reel = state.reels[index];
-  const cloneSides = Math.max(4, Math.floor(reel.sides / 2));
-  const clone = { ...structuredClone(reel), id: `${reel.id}-clone-${Date.now()}`, sides: cloneSides, sellPrice: Math.max(1, Math.floor(reel.sellPrice / 2)), bias: Math.max(0, (reel.bias ?? 0) - 1) };
-  state.reels.splice(index + 1, 0, clone);
+  if (reel.sides <= 4 || reel.transformLocked) return false;
+  const sourceFaces = Array.isArray(reel.faces) && reel.faces.length > 0 ? reel.faces : createSequentialFaces(reel.sides);
+  const nextSize = Math.floor(sourceFaces.length / 2);
+  if (nextSize < 4) return false;
+  const nextFaces = sourceFaces.slice(0, nextSize);
+  const left = {
+    ...structuredClone(reel),
+    id: `${reel.id}-clone-a-${Date.now()}`,
+    sides: nextFaces.length,
+    faces: [...nextFaces],
+    transformLocked: true,
+    sellPrice: Math.floor(reel.sellPrice / 2),
+  };
+  const right = {
+    ...structuredClone(reel),
+    id: `${reel.id}-clone-b-${Date.now()}`,
+    sides: nextFaces.length,
+    faces: [...nextFaces],
+    transformLocked: true,
+    sellPrice: Math.ceil(reel.sellPrice / 2),
+  };
+  state.reels.splice(index, 1, left, right);
   return true;
 }
 
