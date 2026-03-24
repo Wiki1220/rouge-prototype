@@ -309,7 +309,8 @@ function splitSelectedReel(state) {
     sides: leftFaces.length,
     faces: leftFaces,
     transformLocked: true,
-    sellPrice: Math.floor(reel.sellPrice / 2),
+    // Requirement: split / clone must not change the reel's sell price.
+    sellPrice: reel.sellPrice,
   };
   const right = {
     ...structuredClone(reel),
@@ -317,7 +318,7 @@ function splitSelectedReel(state) {
     sides: rightFaces.length,
     faces: rightFaces,
     transformLocked: true,
-    sellPrice: Math.ceil(reel.sellPrice / 2),
+    sellPrice: reel.sellPrice,
   };
   state.reels.splice(index, 1, left, right);
   return true;
@@ -338,7 +339,7 @@ function cloneSelectedReel(state) {
     sides: nextFaces.length,
     faces: [...nextFaces],
     transformLocked: true,
-    sellPrice: Math.floor(reel.sellPrice / 2),
+    sellPrice: reel.sellPrice,
   };
   const right = {
     ...structuredClone(reel),
@@ -346,7 +347,7 @@ function cloneSelectedReel(state) {
     sides: nextFaces.length,
     faces: [...nextFaces],
     transformLocked: true,
-    sellPrice: Math.ceil(reel.sellPrice / 2),
+    sellPrice: reel.sellPrice,
   };
   state.reels.splice(index, 1, left, right);
   return true;
